@@ -1,0 +1,38 @@
+# 국정원 N²SF (National Network Security Framework) 통제항목 매핑 팩
+# 출처: 국가정보원 「국가망보안체계(N²SF)」 가이드라인 — C/S/O 등급 데이터 처리 통제.
+#   - 기밀(C) 데이터: 인터넷망 분리 영역 외부 반출 차단.
+#   - 민감(S) 데이터: 외부 도메인 전송·복사 통제.
+#   - 통제항목을 SecuGent Regulations(banned_path / banned_command / data_label)로 매핑.
+# 병합 규칙: strengthen-only(_merge), 완화 거부. 한국어 라벨 (§C-3).
+version: "kr-n2sf-mapping-1.0.0"
+
+banned_paths:
+  - rule_id: "n2sf-기밀자료-차단"
+    pattern: "*/기밀자료/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "N²SF — 기밀(C) 등급 자료 인터넷망 영역 접근 차단."
+  - rule_id: "n2sf-망분리위반-차단"
+    pattern: "*/대외반출/*"
+    actions: ["file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "N²SF — 망분리 영역 간 대외 반출 디렉토리 쓰기 차단."
+
+banned_commands:
+  # 폐쇄망(인터넷망 분리) 자료의 외부 반출 명령 차단.
+  - rule_id: "n2sf-외부반출-명령-차단"
+    pattern: "\\b(scp|rsync|curl\\s+-T|ftp|sftp|nc)\\b"
+    severity: "critical"
+    hard_block: true
+    description: "N²SF — 폐쇄망 자료 외부 반출(전송) 명령 차단."
+
+data_labels:
+  - rule_id: "n2sf-라벨-기밀데이터"
+    label: "기밀데이터"
+    path_patterns: ["*/기밀자료/*", "*/c등급/*"]
+    allowed_actions: ["file_read"]
+    severity: "critical"
+    hard_block: true
+    description: "N²SF — 기밀(C) 데이터는 읽기만 허용, 외부 전송/쓰기 차단."

@@ -1,0 +1,282 @@
+# SecuGent — production on-prem stack.
+#
+# Boot:  docker compose --env-file .env up -d
+#
+# WHAT IS LIVE vs PROVISIONED:
+#   * Event store / audit log  -> SQLite at SECUGENT_DB_PATH (/app/data, a named
+#     volume). This is the LIVE durable source of truth + hash chain.
+#   * Secrets                  -> environment variables (EnvSecretsBackend).
+#   * Postgres + Vault         -> PROVISIONED but NOT YET CONSUMED by the app.
+#     create_app() does not construct PgEventStore or VaultSecretsBackend yet;
+#     DATABASE_URL / VAULT_* are injected so the operator config is complete for
+#     the forthcoming wiring. Do not assume events land in Postgres or that
+#     secrets resolve from Vault today. (See the per-var NOTEs below.)
+#
+# IMPORTANT — Vault is NOT auto-unsealed in production. The prod vault runs a
+# real file-storage server (deploy/vault/vault.hcl) that starts SEALED and
+# UNINITIALIZED, so `vault status` (its healthcheck) exits non-zero until an
+# operator runs the one-time init + unseal step:
+#
+#   docker compose exec vault vault operator init    # save unseal keys OFFLINE
+#   docker compose exec vault vault operator unseal   # repeat to the threshold
+#
+# Because the api depends on vault WITHOUT condition: service_healthy (it does
+# not consume Vault yet), the api comes up on the first `up -d` even while Vault
+# is still sealed — the single-command boot promise holds. Unseal Vault before
+# the secrets backend is wired into a future release. Full runbook:
+# deploy/vault/vault.hcl. The dev stack (docker-compose.dev.yml) uses
+# `server -dev` which auto-unseals.
+#
+# Fail-closed by design: every secret is injected from the environment with the
+# ${VAR:?message} form, so `docker compose up` aborts immediately if a required
+# secret is unset. NO secret defaults are baked into this file. Dev-only weak
+# values live exclusively in docker-compose.dev.yml (the override), never here.
+#
+# The obsolete top-level `version:` key is intentionally omitted.
+
+services:
+  secugent-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: secugent/api:0.1.0
+    restart: unless-stopped
+    environment:
+      # Durable event store path. create_app() (secugent/api/main.py) defaults
+      # SECUGENT_DB_PATH to .secugent/secugent.db -> /app/.secugent/secugent.db,
+      # which is NOT under the audit_logs volume below. Point it explicitly at
+      # /app/data (a declared named volume) so the append-only event store and
+      # its hash chain survive `docker compose down/up` and any container
+      # recreate (C-1 6-month retention, C-2 tamper-evident chain).
+      SECUGENT_DB_PATH: /app/data/secugent.db
+      # --- PROVISIONED BUT NOT YET CONSUMED BY THE APP (see note below) -------
+      # Async Postgres event store DSN. Password is required — no default.
+      # NOTE: create_app() does NOT yet construct PgEventStore; the running app
+      # writes the SQLite event store at SECUGENT_DB_PATH. DATABASE_URL is
+      # injected so the operator-facing config is complete for when the PG store
+      # is wired into boot, but it is NOT the live durability path today.
+      DATABASE_URL: postgresql+asyncpg://secugent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/secugent
+      # Vault KV v2 secrets backend. NOTE: create_app() does NOT yet construct
+      # VaultSecretsBackend; these are provisioned for the forthcoming wiring,
+      # not consumed by the app today. Until then secrets come from the
+      # environment (EnvSecretsBackend), not Vault.
+      VAULT_ADDR: ${VAULT_ADDR:?VAULT_ADDR is required}
+      VAULT_TOKEN: ${VAULT_TOKEN:?VAULT_TOKEN is required}
+      # LLM provider key (BYO-Model; required for live planning).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      SECUGENT_ENV: production
+    volumes:
+      # Durable event store (SQLite at SECUGENT_DB_PATH=/app/data/secugent.db).
+      # This is the app's actual append-only audit source of truth + hash chain,
+      # so it MUST persist across container recreate. A NAMED volume (not a host
+      # bind mount) is used deliberately: a fresh host dir is created root-owned
+      # and a bind mount overrides the image's uid-10001 ownership -> the
+      # non-root process hits EACCES and the compliance store silently fails
+      # (C-1/C-2). A named volume inherits the chowned image-dir ownership.
+      - secugent_data:/app/data
+      # Reserved for logs/events/*.jsonl if the JsonlLogger artifact is wired.
+      - audit_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Vault uses condition: service_started (NOT service_healthy) on purpose.
+      # The prod vault starts SEALED, so its `vault status` healthcheck stays
+      # non-zero until an operator runs init+unseal — a service_healthy gate here
+      # would wedge the api in `created` on first `up -d` (breaking the
+      # single-command boot) for a backend the app does not yet consume. Keep the
+      # ordering hint only; restart: unless-stopped reconnects once Vault is
+      # wired and unsealed.
+      vault:
+        condition: service_started
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  secugent-ui:
+    # Build the SPA into the image (multi-stage: vite build -> nginx). The stock
+    # nginx image with only nginx.conf mounted serves an empty web root, so the
+    # SecuGent app was never delivered. nginx.conf is baked into the image by the
+    # Dockerfile, so no conf bind-mount is needed here.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.ui
+    image: secugent/ui:0.1.0
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - secugent-api
+
+  # --- PG HA (DEFAULT topology, BDP_04 항목 13) -----------------------------
+  # `postgres` is the writable PRIMARY; `postgres-standby` is a streaming
+  # read replica. HA is the DEFAULT here (not opt-in). The app's leader lease
+  # (secugent/orchestrator/lease.py + event_store_pg.py pg_advisory_lock)
+  # serializes writers against the SINGLE primary instance.
+  #
+  # HONEST SCOPE (do not over-read): this is NOT an automatic, lease-expiry
+  # failover and NOT a cross-server split-brain fence. (1) The leader lease has
+  # no TTL/expiry and the single-writer gate (HaWriterArbiter) is provisioned but
+  # NOT wired into the live append path — promotion is operator/orchestrator
+  # -driven. (2) primary and standby are independent PG servers with separate
+  # advisory-lock namespaces, so on a network partition an operator could promote
+  # the standby while the old primary still accepts writes (two primaries) unless
+  # the old primary is fenced (STONITH) or sync replication + connection cutover
+  # is used. Until fencing exists, treat the guarantee as "writers serialized
+  # against one PG instance", and fence before promoting. For a single-node dev
+  # box, the dev override scales postgres-standby to 0.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: secugent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: secugent
+      # Streaming-replication slot + WAL settings so the standby can attach.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "hot_standby=on"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Replication bootstrap: creates a REPLICATION-capable role, a physical
+      # replication slot, and a `host replication` pg_hba entry on first init.
+      # Without it pg_basebackup from the standby is rejected (no pg_hba entry
+      # for replication) and the standby crash-loops. Runs once via the official
+      # entrypoint's /docker-entrypoint-initdb.d hook.
+      - ./postgres/init-replication.sh:/docker-entrypoint-initdb.d/00-init-replication.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secugent -d secugent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-standby:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: secugent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: secugent
+      # Bootstrap as a hot-standby via pg_basebackup against the primary. The
+      # primary must be healthy first (depends_on below).
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    # Hot standby: base-backup from primary on first boot, then stream. This is
+    # the read replica; writes are rejected here (the app's lease keeps the sole
+    # writer on the primary). Promotion is operator/orchestrator-driven — there is
+    # NO automatic lease-expiry failover, and no fencing of the old primary, so a
+    # network partition can fork the two PG servers; promote with operator
+    # judgement (see README §3 / §5).
+    #
+    # IMPORTANT: postgres:16-alpine ships BusyBox `sh`, NOT `bash` — using `bash`
+    # here crash-loops with `exec: bash: not found`. The script is POSIX-only.
+    command: >-
+      sh -c '
+      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+        until pg_isready -h postgres -U secugent; do sleep 2; done;
+        pg_basebackup -h postgres -U secugent -D /var/lib/postgresql/data -Fp -Xs -P -R;
+      fi;
+      exec postgres -c hot_standby=on'
+    volumes:
+      - postgres_standby_data:/var/lib/postgresql/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secugent -d secugent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  vault:
+    image: hashicorp/vault:1.16
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR:?VAULT_ADDR is required}
+    # Run a REAL Vault server against the mounted config. Without an explicit
+    # command + config the image default (`vault server`, no config) exits with
+    # "No configuration files found" and crash-loops, so the `vault status`
+    # healthcheck never passes and secugent-api (depends_on: service_healthy)
+    # never boots. The dev override (docker-compose.dev.yml) supplies
+    # `server -dev` instead for local use.
+    command: ["server", "-config=/vault/config/vault.hcl"]
+    volumes:
+      - ./vault/vault.hcl:/vault/config/vault.hcl:ro
+      - vault_data:/vault/file
+    healthcheck:
+      # Exit 0 only when Vault is initialized AND unsealed. Expected to stay
+      # unhealthy after first boot until `vault operator init` + `unseal` are run
+      # (see deploy/vault/vault.hcl runbook). Generous start_period covers that.
+      test: ["CMD", "vault", "status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    restart: unless-stopped
+    volumes:
+      # Mounts prometheus.yml AND alerts/secugent.yml (picked up by rule_files).
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      # Loopback-only. Prometheus has NO built-in auth, so binding 0.0.0.0 would
+      # expose the full metrics/PromQL/scrape-config surface unauthenticated
+      # (per-tenant run rates, HITL backlog, policy-block counts) to anyone who
+      # can reach the host — a fail-open data leak for a security-first product.
+      # Grafana scrapes it over the internal compose network as
+      # http://prometheus:9090; operators reach the UI via an SSH tunnel to
+      # 127.0.0.1:9090. Same discipline as vault.hcl not publishing :8200.
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - secugent-api
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
+    volumes:
+      # Provisioning (datasource + dashboard provider configs) is kept SEPARATE
+      # from the dashboard JSON so Grafana does not try to parse the dashboard
+      # as a provider config.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      # Loopback-only: reach Grafana (which IS auth-gated by
+      # GF_SECURITY_ADMIN_PASSWORD) via an SSH tunnel or the nginx edge, never
+      # by publishing the dashboard to 0.0.0.0 on the host.
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  # Durable SQLite event store (append-only audit log + hash chain). Survives
+  # container recreate so C-1/C-2 retention and tamper-evidence hold.
+  secugent_data:
+  audit_logs:
+  postgres_data:
+  postgres_standby_data:
+  vault_data:
+  prometheus_data:
+  grafana_data:

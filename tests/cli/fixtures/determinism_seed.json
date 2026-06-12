@@ -1,0 +1,75 @@
+{
+  "regulations": {
+    "version": "ci-determinism-seed-1.0.0",
+    "banned_paths": [
+      {
+        "rule_id": "대외비-차단",
+        "pattern": "*/대외비/*",
+        "actions": ["file_read", "file_write", "desktop"],
+        "severity": "critical",
+        "hard_block": true,
+        "description": "대외비 디렉터리는 접근 불가 (한국 금융/공공 픽스처)."
+      }
+    ],
+    "domain_policy": {
+      "rule_id": "default-domain-policy",
+      "mode": "allow_list",
+      "domains": ["example.com"],
+      "allow_subdomains": true,
+      "block_ip_literal": true,
+      "block_punycode": true,
+      "hard_block": true
+    },
+    "banned_commands": [
+      {
+        "rule_id": "deny-rm-rf",
+        "pattern": "\\brm\\s+-rf\\b",
+        "severity": "critical",
+        "hard_block": true
+      }
+    ],
+    "data_labels": []
+  },
+  "steps": [
+    {
+      "step": {
+        "tenant_id": "financial-kr",
+        "run_id": "배포-r0",
+        "actor": "sub:reader",
+        "action_type": "file_read",
+        "target": "/data/대외비/심사.txt",
+        "context": {"sensitive": true}
+      }
+    },
+    {
+      "step": {
+        "tenant_id": "financial-kr",
+        "run_id": "배포-r1",
+        "actor": "sub:web",
+        "action_type": "http_get",
+        "target": "https://example.com/policy",
+        "context": {"untrusted_input": true}
+      }
+    },
+    {
+      "step": {
+        "tenant_id": "financial-kr",
+        "run_id": "배포-r2",
+        "actor": "sub:writer",
+        "action_type": "file_write",
+        "target": "/data/work/report.txt",
+        "context": {"untrusted_input": true, "sensitive": true}
+      }
+    },
+    {
+      "step": {
+        "tenant_id": "financial-kr",
+        "run_id": "배포-r3",
+        "actor": "sub:shell",
+        "action_type": "compute",
+        "command": "rm -rf /",
+        "context": {}
+      }
+    }
+  ]
+}

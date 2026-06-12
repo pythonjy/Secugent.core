@@ -1,0 +1,13 @@
+SecuGent Enterprise License Notice
+
+SPDX-License-Identifier: LicenseRef-SecuGent-Enterprise
+
+SecuGent Enterprise-tier files are not licensed under the Apache-2.0 Core
+license. They are distributed under the SecuGent Enterprise license reference
+above, with BSL-1.1 used as the intended commercial-source basis unless a
+separate written commercial agreement says otherwise.
+
+Do not ask automation agents to regenerate or paste the full standard license
+text into this repository. If the full BSL-1.1 text is required for a release,
+place it manually from the official upstream license source and keep this
+project-specific notice intact.

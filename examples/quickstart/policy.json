@@ -1,0 +1,23 @@
+{
+  "version": "quickstart-1.0.0",
+  "banned_paths": [
+    {
+      "rule_id": "secrets-block",
+      "pattern": "*/.ssh/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "SSH private key directory is off-limits."
+    }
+  ],
+  "domain_policy": {
+    "rule_id": "egress-allow-list",
+    "mode": "allow_list",
+    "domains": ["example.com"],
+    "allow_subdomains": true,
+    "block_ip_literal": true,
+    "block_punycode": true,
+    "hard_block": true,
+    "description": "Only example.com (and subdomains) may be reached."
+  }
+}

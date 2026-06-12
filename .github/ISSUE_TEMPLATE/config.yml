@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 보안 취약점 신고 (Security vulnerability)
+    url: https://github.com/secugent/secugent-core/security/policy
+    about: 보안 취약점은 공개 이슈로 올리지 마세요. SECURITY.md의 비공개 신고 절차를 따르세요.

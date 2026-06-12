@@ -1,0 +1,523 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The Egress Broker — single mediated chokepoint for external effects (EM-05).
+
+Every external side-effect is submitted here. The broker evaluates a fixed,
+strongest-deny-first gate sequence — profile → policy (EM-03) → egress label
+(EM-02) → envelope (EM-07, optional) — then records a decision Event to the
+durable hash chain *before* the transport runs. Any denial, or an audit-append
+failure, means the transport is never called (fail-closed, I-A / durable).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from typing import Any, Protocol, TypeVar
+
+from secugent.core.contracts import Event, Step
+from secugent.core.sec.canonicalize import AmbiguousEffectError
+from secugent.core.sec.effects import EffectKind
+from secugent.core.sec.labels import DataLabel, may_egress
+from secugent.core.sec.policy import CompiledPolicy, Decision
+from secugent.core.sec.reversibility import ManifestRegistry, ReversibilityClass
+from secugent.core.tenancy import Principal
+from secugent.io.broker.effect_bridge import build_effect
+from secugent.io.broker.profiles import ExecutionProfile, profile_permits
+from secugent.io.broker.request import EgressRequest, EgressResult
+from secugent.io.broker.transport import Transport
+from secugent.tools import builtin
+from secugent.tools.router import ToolDispatchError
+
+__all__ = [
+    "EgressBroker",
+    "AuditStore",
+    "EnvelopeGate",
+    "ConnectorTransportLike",
+    "EgressDeniedError",
+    "EnvelopeSuspendedError",
+    "AuditAppendError",
+    "StagingHeldError",
+    "StagingStore",
+]
+
+_T = TypeVar("_T")
+
+_log = logging.getLogger("secugent.io.broker")
+
+# Write-class effects carry a payload; dispatching one without content would
+# silently "write nothing" (fail-OPEN). These kinds require an explicit payload
+# (an *empty* payload b"" is a legitimate truncate; only a missing one is refused).
+_WRITE_KINDS: frozenset[EffectKind] = frozenset(
+    {EffectKind.FILE_WRITE, EffectKind.NET_SEND, EffectKind.CONNECTOR_ACTION}
+)
+
+
+# Broker denials are ToolDispatchError subclasses so the live SubAgent's existing
+# `except (... ToolDispatchError)` handles them with zero changes.
+class EgressDeniedError(ToolDispatchError):
+    """A gate (profile/policy/label) denied the effect."""
+
+
+class EnvelopeSuspendedError(ToolDispatchError):
+    """The effect is outside the authorization envelope → HITL required (EM-07)."""
+
+
+class AuditAppendError(ToolDispatchError):
+    """The pre-execution audit append failed → execution refused (fail-closed)."""
+
+
+class StagingHeldError(ToolDispatchError):
+    """An irreversible effect was held in 2-phase staging (EM-09) — not executed."""
+
+
+class AuditStore(Protocol):
+    """Durable, hash-chained event sink (satisfied by ChainedEventStore)."""
+
+    def append_event(self, event: Event) -> Any: ...
+
+
+class EnvelopeVerdict(Protocol):
+    outcome: str  # "allow" | "suspend"
+    reason: str
+
+
+class EnvelopeGate(Protocol):
+    """EM-07 injection point: decide whether a request is within the envelope."""
+
+    def check(self, request: EgressRequest) -> EnvelopeVerdict: ...
+
+
+class UnscopedSink(Protocol):
+    """EM-04 injection point: record an effect that matched no explicit rule
+    (satisfied structurally by ``audit.unscoped.UnscopedRecorder``)."""
+
+    def record(self, *, tenant_id: Any, effect: Any, run_id: str | None = ...) -> Any: ...
+
+
+class StagingStore(Protocol):
+    """EM-09 injection point: hold an irreversible effect for 2-phase commit
+    (satisfied structurally by ``io.staging.StagedEffectStore``)."""
+
+    def stage(
+        self,
+        req: EgressRequest,
+        *,
+        reversibility: ReversibilityClass,
+        hold_sec: int,
+        now: datetime,
+        compensating_action: str | None = ...,
+        audit: Any = ...,
+    ) -> Any: ...
+
+
+class ConnectorEgressResultLike(Protocol):
+    """The shape :class:`ConnectorTransport.dispatch` returns (token-scrubbed)."""
+
+    ok: bool
+    payload: dict[str, Any]
+
+
+class ConnectorTransportLike(Protocol):
+    """EM-06 connector egress injection point (satisfied by ``ConnectorTransport``).
+
+    Declared structurally — not imported — so the broker does not depend on the
+    concrete EM-06 transport (back-compat: connector egress stays a go-live diff).
+    ``dispatch`` is async; the broker bridges its sync drop-in to it.
+    """
+
+    async def dispatch(
+        self, request: EgressRequest, *, http_transport: Any | None = ...
+    ) -> ConnectorEgressResultLike: ...
+
+
+class EgressBroker:
+    """Mediates, evaluates, audits, and executes every external effect."""
+
+    def __init__(
+        self,
+        *,
+        policy: CompiledPolicy,
+        audit_store: AuditStore,
+        transport: Transport,
+        max_external: DataLabel = DataLabel.INTERNAL_USE,
+        envelope_gate: EnvelopeGate | None = None,
+        connector_transport: ConnectorTransportLike | None = None,
+        registry: ManifestRegistry | None = None,
+        staging_store: StagingStore | None = None,
+        unscoped_recorder: UnscopedSink | None = None,
+        hold_sec: int = 0,
+        now_provider: Callable[[], datetime] | None = None,
+        sandbox_roots: list[str] | None = None,
+        default_profile: ExecutionProfile = ExecutionProfile.INTERNAL_RW,
+        default_label: DataLabel = DataLabel.CONFIDENTIAL,
+        actor: str = "broker",
+    ) -> None:
+        self._policy = policy
+        self._audit = audit_store
+        self._transport = transport
+        self._max_external = max_external
+        self._envelope_gate = envelope_gate
+        # EM-06: connector egress transport. None until go-live wiring lands; a
+        # connector_action submitted with no transport configured fails closed.
+        self._connector_transport = connector_transport
+        # EM-09: reversibility registry + staging store. When both are set,
+        # irreversible effects are diverted to 2-phase staging instead of the
+        # transport (I-C); if a registry classifies IRREVERSIBLE but no staging
+        # store is wired, the effect is denied (fail-closed).
+        self._registry = registry
+        self._staging_store = staging_store
+        if staging_store is not None and registry is None:
+            # Misconfiguration would fail OPEN for I-C (irreversible effects would
+            # execute directly). Require a registry whenever staging is wired.
+            raise ValueError("staging_store requires a registry to classify reversibility (I-C)")
+        self._unscoped = unscoped_recorder
+        self._hold_sec = hold_sec
+        self._now_provider = now_provider
+        self._sandbox_roots = list(sandbox_roots or [])
+        self._default_profile = default_profile
+        self._default_label = default_label
+        self._actor = actor
+
+    async def submit(self, req: EgressRequest) -> EgressResult:
+        """Async public API (transport may become async with connectors/EM-06)."""
+        return self._submit(req)
+
+    # ------------------------------------------------------------------ #
+    # Core gate sequence (sync — strongest-deny-first, fail-closed)
+    # ------------------------------------------------------------------ #
+
+    def _run_gates(
+        self, req: EgressRequest
+    ) -> tuple[EgressResult, None] | tuple[None, tuple[Decision, Event]]:
+        """Run the strongest-deny-first gate chain + audit-before-act (I-A).
+
+        Returns ``(deny_result, None)`` if any gate denied / staged / the
+        pre-execution audit append failed, or ``(None, (allow_decision, audit_event))``
+        when the effect is cleared to execute (the durable decision event is
+        already appended). The SAME chain backs both the sync router transport
+        path (:meth:`_submit`) and the async connector path
+        (:meth:`dispatch_connector`) so neither can skip a gate.
+        """
+        # 1. Profile boundary.
+        if not profile_permits(req.profile, req.effect):
+            return (
+                self._deny(
+                    req,
+                    Decision(
+                        outcome="deny",
+                        rule_id=None,
+                        rationale=f"profile_boundary:{req.effect.sink_class} not allowed in {req.profile}",
+                    ),
+                ),
+                None,
+            )
+        # 2. Signed policy (EM-03).
+        decision = self._policy.evaluate(req.effect, req.label)
+        if decision.outcome != "allow":
+            # EM-04: an effect that matched NO explicit rule (default_deny,
+            # rule_id is None) is 'unscoped' — record it for the completeness
+            # review queue. Audit-only; the effect is still denied. Telemetry must
+            # never change the deny semantics, so a recorder failure is swallowed
+            # (mirrors the best-effort deny-path audit append below).
+            if decision.rule_id is None and self._unscoped is not None:
+                try:
+                    self._unscoped.record(
+                        tenant_id=req.principal.tenant_id, effect=req.effect, run_id=req.run_id
+                    )
+                except Exception as exc:  # noqa: BLE001 - telemetry is non-fatal to the deny result
+                    _log.warning("unscoped telemetry record failed (non-fatal): %s", exc)
+            return self._deny(req, decision), None
+        # 3. Egress label (EM-02).
+        label_decision = may_egress(req.label, req.effect.sink_class, max_external=self._max_external)
+        if not label_decision.allow:
+            return (
+                self._deny(
+                    req,
+                    Decision(outcome="deny", rule_id=None, rationale=f"egress_label:{label_decision.reason}"),
+                ),
+                None,
+            )
+        # 4. Authorization envelope (EM-07, optional).
+        if self._envelope_gate is not None:
+            verdict = self._envelope_gate.check(req)
+            if verdict.outcome != "allow":
+                return (
+                    self._deny(
+                        req,
+                        Decision(
+                            outcome="deny", rule_id=None, rationale=f"envelope_suspend:{verdict.reason}"
+                        ),
+                    ),
+                    None,
+                )
+        # 4b. Irreversible effects divert to 2-phase staging (EM-09, I-C).
+        diverted = self._maybe_stage(req)
+        if diverted is not None:
+            return diverted, None
+        # 5. Audit BEFORE act — durable failure ⇒ refuse execution (I-A).
+        event = self._decision_event(req, decision, allowed=True, gate="execute")
+        try:
+            self._audit.append_event(event)
+        except Exception as exc:  # noqa: BLE001 - fail-closed: ANY durable failure blocks execution
+            _log.error("egress audit append failed; refusing execution: %s", exc)
+            return (
+                EgressResult(
+                    ok=False,
+                    decision=Decision(outcome="deny", rule_id=None, rationale="audit_append_failed"),
+                    payload=None,
+                    audit_event_id="",
+                ),
+                None,
+            )
+        return None, (decision, event)
+
+    def _submit(self, req: EgressRequest) -> EgressResult:
+        deny, allowed = self._run_gates(req)
+        if deny is not None:
+            return deny
+        assert allowed is not None  # _run_gates returns exactly one of (deny, allowed)
+        decision, event = allowed
+        # Execute via the sole sync transport, then record completion.
+        payload = self._transport.execute(req)
+        self._post_audit(req)
+        return EgressResult(ok=True, decision=decision, payload=payload, audit_event_id=event.id)
+
+    def _maybe_stage(self, req: EgressRequest) -> EgressResult | None:
+        """Return a 'held' result if the effect is irreversible and staged; else
+        None (reversible/compensatable, or no registry → execute directly)."""
+        if self._registry is None:
+            return None
+        action_key = req.effect.action or str(req.effect.kind)
+        reversibility = self._registry.classify(action_key)
+        if reversibility is not ReversibilityClass.IRREVERSIBLE:
+            return None
+        if self._staging_store is None:
+            # Irreversible with no staging wired ⇒ refuse (I-C, fail-closed).
+            return self._deny(
+                req, Decision(outcome="deny", rule_id=None, rationale="irreversible_requires_staging")
+            )
+        manifest = self._registry.manifest_for(action_key)
+        staged = self._staging_store.stage(
+            req,
+            reversibility=reversibility,
+            hold_sec=self._hold_sec,
+            now=self._now(),
+            compensating_action=manifest.compensating_action if manifest is not None else None,
+            audit=self._audit,
+        )
+        return EgressResult(
+            ok=False,
+            decision=Decision(outcome="deny", rule_id=None, rationale=f"staged:{staged.id}"),
+            payload=None,
+            audit_event_id="",
+        )
+
+    def _now(self) -> datetime:
+        if self._now_provider is not None:
+            return self._now_provider()
+        return datetime.now(tz=UTC)
+
+    # ------------------------------------------------------------------ #
+    # Audit helpers
+    # ------------------------------------------------------------------ #
+
+    def _deny(self, req: EgressRequest, decision: Decision) -> EgressResult:
+        event = self._decision_event(req, decision, allowed=False, gate="deny")
+        audit_id = ""
+        try:
+            self._audit.append_event(event)
+            audit_id = event.id
+        except Exception as exc:  # noqa: BLE001 - deny already blocks; record-failure is non-fatal
+            _log.warning("egress deny audit append failed: %s", exc)
+        return EgressResult(ok=False, decision=decision, payload=None, audit_event_id=audit_id)
+
+    def _post_audit(self, req: EgressRequest) -> None:
+        event = Event(
+            tenant_id=req.principal.tenant_id,
+            actor=self._actor,
+            type="egress.executed",
+            run_id=req.run_id,
+            payload={"effect_fingerprint": req.effect.fingerprint(), "target": req.effect.target},
+            severity="info",
+        )
+        try:
+            self._audit.append_event(event)
+        except Exception as exc:  # noqa: BLE001 - effect already executed; never fake success
+            _log.error("egress post-exec audit failed (effect already executed): %s", exc)
+
+    def _decision_event(self, req: EgressRequest, decision: Decision, *, allowed: bool, gate: str) -> Event:
+        return Event(
+            tenant_id=req.principal.tenant_id,
+            actor=self._actor,
+            type="egress.allowed" if allowed else "egress.denied",
+            run_id=req.run_id,
+            payload={
+                "effect_fingerprint": req.effect.fingerprint(),
+                "kind": str(req.effect.kind),
+                "sink": str(req.effect.sink_class),
+                "target": req.effect.target,
+                "label": int(req.label),
+                "profile": str(req.profile),
+                "outcome": decision.outcome,
+                "rationale": decision.rationale,
+                "gate": gate,
+            },
+            severity="info" if allowed else "warn",
+        )
+
+    # ------------------------------------------------------------------ #
+    # Go-live shim (deferred): router-compatible dispatch for SubAgent.
+    # Built + unit-tested here; injected into main.py only when it is clean.
+    # ------------------------------------------------------------------ #
+
+    def dispatch(
+        self,
+        step: Step,
+        *,
+        content: str | bytes | None = None,
+        http_transport: Any | None = None,
+    ) -> builtin.ToolResult:
+        # build_effect failure (ambiguous/non-canonical target) is fail-closed:
+        # convert it to a deny so the SubAgent's `except ToolDispatchError` treats
+        # it as step.tool_failed (it never reaches a transport).
+        try:
+            effect = build_effect(step, sandbox_roots=self._sandbox_roots)
+        except AmbiguousEffectError as exc:
+            raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
+        principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
+
+        # Connector egress (EM-06) bridges the sync drop-in to the async
+        # ConnectorTransport, AFTER the same gate chain — never the router path.
+        if effect.kind is EffectKind.CONNECTOR_ACTION:
+            req = EgressRequest(
+                effect=effect,
+                label=self._default_label,
+                principal=principal,
+                run_id=step.run_id,
+                profile=self._default_profile,
+                content=None,  # connector params travel in effect.meta, not content
+            )
+            return self._run_coroutine(self._dispatch_connector_req(req, http_transport=http_transport))
+
+        # The SubAgent calls dispatch(step) without explicit content; mirror
+        # ToolRouter's own fallback and carry the write payload from the step so
+        # it survives the Step→Effect→Step round-trip through the transport.
+        if content is None:
+            ctx_content = step.context.get("content")
+            if isinstance(ctx_content, (str, bytes)):
+                content = ctx_content
+        content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        # Fail-closed: a write-class effect with no payload must not be silently
+        # submitted (it would "write nothing"). Refuse before any transport/audit.
+        if content_bytes is None and effect.kind in _WRITE_KINDS:
+            raise EgressDeniedError(
+                f"write_content_missing:{effect.kind} effect requires content "
+                "(none supplied via argument or step.context['content'])"
+            )
+        req = EgressRequest(
+            effect=effect,
+            label=self._default_label,
+            principal=principal,
+            run_id=step.run_id,
+            profile=self._default_profile,
+            content=content_bytes,
+        )
+        result = self._submit(req)
+        if not result.ok:
+            raise _result_error(result)
+        return builtin.ToolResult(ok=True, payload={"audit_event_id": result.audit_event_id})
+
+    async def dispatch_connector(
+        self, step: Step, *, http_transport: Any | None = None
+    ) -> builtin.ToolResult:
+        """Async connector_action drop-in: same gates, then ConnectorTransport.
+
+        Exposed for async callers (and as the awaited core of the sync
+        :meth:`dispatch` bridge). Raises a :class:`ToolDispatchError` subclass on
+        any deny so the SubAgent's existing handler routes it to step.tool_failed.
+        """
+        try:
+            effect = build_effect(step, sandbox_roots=self._sandbox_roots)
+        except AmbiguousEffectError as exc:
+            raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
+        if effect.kind is not EffectKind.CONNECTOR_ACTION:
+            raise EgressDeniedError(f"dispatch_connector requires a connector_action step, got {effect.kind}")
+        principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
+        req = EgressRequest(
+            effect=effect,
+            label=self._default_label,
+            principal=principal,
+            run_id=step.run_id,
+            profile=self._default_profile,
+            content=None,
+        )
+        return await self._dispatch_connector_req(req, http_transport=http_transport)
+
+    async def _dispatch_connector_req(
+        self, req: EgressRequest, *, http_transport: Any | None
+    ) -> builtin.ToolResult:
+        # Fail-closed: no connector transport wired ⇒ refuse before any gate work
+        # (a connector_action that "passes" with no transport would fail OPEN).
+        if self._connector_transport is None:
+            raise EgressDeniedError("connector_transport_not_configured")
+        # IDENTICAL gate chain as the router path — connectors cannot skip a gate.
+        deny, allowed = self._run_gates(req)
+        if deny is not None:
+            raise _result_error(deny)
+        assert allowed is not None
+        # Cleared by every broker gate; hand off to the EM-06 transport, which
+        # applies its own membership gate + credential isolation (candidate-1).
+        try:
+            cres = await self._connector_transport.dispatch(req, http_transport=http_transport)
+        except ToolDispatchError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - downstream connector/credential deny ⇒ fail-closed
+            # CredentialError (undeclared/malformed action, unknown connector) and
+            # any connector execution error are converted to a deny so the SubAgent
+            # treats them as step.tool_failed — never as a silent success.
+            raise EgressDeniedError(f"connector_dispatch_failed:{type(exc).__name__}:{exc}") from exc
+        self._post_audit(req)
+        return builtin.ToolResult(
+            ok=True,
+            payload={
+                "audit_event_id": allowed[1].id,
+                "connector_ok": bool(cres.ok),
+                "connector_payload": dict(cres.payload),
+            },
+        )
+
+    @staticmethod
+    def _run_coroutine(coro: Coroutine[Any, Any, _T]) -> _T:
+        """Run ``coro`` to completion from a synchronous caller.
+
+        The SubAgent runs in an ``asyncio.to_thread`` worker (no running loop in
+        that thread) → the common path is :func:`asyncio.run`. If a loop *is*
+        already running on this thread (a future async caller using the sync
+        drop-in), we run the coroutine on a dedicated single-shot worker thread +
+        fresh loop so we never deadlock by blocking the live loop.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(coro)).result()
+
+
+def _result_error(result: EgressResult) -> ToolDispatchError:
+    """Map a denied :class:`EgressResult` to the matching broker exception.
+
+    Shared by the sync router path and the connector path so a given deny
+    rationale always surfaces as the same :class:`ToolDispatchError` subclass.
+    """
+    rationale = result.decision.rationale
+    if rationale.startswith("envelope_suspend"):
+        return EnvelopeSuspendedError(rationale)
+    if rationale == "audit_append_failed":
+        return AuditAppendError(rationale)
+    if rationale.startswith("staged:"):
+        return StagingHeldError(rationale)
+    return EgressDeniedError(rationale)

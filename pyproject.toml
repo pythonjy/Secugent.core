@@ -1,0 +1,184 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secugent"
+version = "0.1.0"
+description = "SecuGent — Human-in-the-loop Enterprise Agent Platform (MVP)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "SecuGent" }]
+dependencies = [
+    "pydantic>=2.6",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "websockets>=12.0",
+    "anthropic>=0.40.0",
+    "tenacity>=8.2",
+    "python-multipart>=0.0.9",
+    "jsonschema>=4.21",
+    # BDP_02 item 6: PyYAML backs secugent/regulations/tenant_loader.py's
+    # module-top `import yaml`. tenant_loader is on the DETERMINISTIC REGULATIONS
+    # path (§B-4a) — for_tenant/for_run import it, not just the optional Korean
+    # packs — so this MUST be a first-class runtime dependency, not a transitive
+    # extra (uvicorn[standard]). A slim air-gapped/closed-network install (§A-2.6)
+    # that trims that extra would otherwise ModuleNotFoundError at import time and
+    # take down the entire tenant regulations loader (§B-9 의존성 고정).
+    "PyYAML>=6.0",
+    # Stage 8D: 구조화 로깅 (§C-2 감사로그 스키마 지원)
+    "structlog>=24.1.0",
+    # Stage 8D: 비동기 이메일 전송 (Notifier async email)
+    "aiosmtplib>=3.0",
+    # BDP_02 item 10: httpx backs the DEFAULT transport for the domestic/sovereign
+    # LLM adapters (secugent/core/llm_clients/_transport.py). The adapters import
+    # it LAZILY (only when no transport is injected), so importing the core never
+    # requires it — but a closed-network/sovereign production deployment that
+    # configures SECUGENT_DOMESTIC_MODEL reaches default_transport() at runtime
+    # and would otherwise fail with TransportError. Declaring it first-class
+    # (not a dev-only extra) keeps the sovereign-model path correct on a slim
+    # air-gapped install (§A-2.6, §B-9 의존성 고정). The notifier (httpx-or-urllib)
+    # already used httpx transitively; this makes the contract explicit.
+    "httpx>=0.27",
+    # secugent/observability/metrics.py imports prometheus_client at module top
+    # (REGISTRY + Counter/Histogram/Gauge), and the DETERMINISTIC approval.py pulls
+    # APPROVAL_WAIT from it — so it is a first-class runtime dependency of public
+    # Core, not optional. A standalone `pip install secugent` (open-core repo) would
+    # otherwise ModuleNotFoundError on `secugent demo` (§B-9 의존성 고정, I8/I9).
+    "prometheus_client>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "pytest-timeout>=2.3",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "httpx>=0.27",
+    "hypothesis>=6.100",
+    # BDP_02 item 6: PyYAML stubs so `mypy --strict secugent` type-checks the yaml
+    # import surface in regulations/tenant_loader.py instead of resolving it to
+    # Any via ignore_missing_imports.
+    "types-PyYAML>=6.0",
+]
+desktop-docker = [
+    "docker>=7.0.0",
+]
+# H-4: PostgreSQL event store + HA leases (secugent/core/event_store_pg.py).
+# Optional so the core boots slim on air-gapped hosts; absence fails closed at
+# PgEventStore construction with an explicit PgEventStoreError.
+pg = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    # G-H14: Alembic owns the production PG schema (migrations/). The dev-only
+    # PgEventStore.ensure_schema path stays drift-0 with the baseline migration.
+    "alembic>=1.13",
+]
+# C-3: HashiCorp Vault KV v2 secrets backend (secugent/core/secrets.py).
+vault = [
+    "hvac>=2.2",
+]
+# PHASE 10 observability runtime, recommended for the production image.
+# create_app() exposes /metrics (prometheus_client) — the exact target
+# prometheus.yml scrapes — and calls init_tracing() (opentelemetry). init_tracing
+# is fail-soft (no-op if opentelemetry is absent), so a missing obs extra is NOT
+# boot-fatal, but: without prometheus_client /metrics returns 500 (the scrape
+# target breaks), and without opentelemetry there is no tracing. deploy/Dockerfile
+# installs ".[pg,vault,obs]" so the image has both.
+#
+# NOTE: these are `>=` lower bounds, NOT a frozen lockfile — they do not by
+# themselves make the image byte-reproducible. Pin exact versions in a
+# constraints file for true air-gap reproducibility (see the Dockerfile caveat).
+obs = [
+    "prometheus-client>=0.20",
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+]
+# BDP_01 item 1: open-core boundary. The Enterprise tier (BSL-1.1,
+# secugent/enterprise/*) ships behind this extra so the Apache-2.0 Core installs
+# slim. require_enterprise()'s remedy `pip install 'secugent[enterprise]'` MUST
+# resolve to this extra. boto3 backs AwsKmsProvider; hvac backs
+# VaultTransitProvider (also in the `vault` extra). Adding a dep an Enterprise
+# feature lazily imports? declare it here so the install remedy stays honest.
+enterprise = [
+    "boto3>=1.34",
+    "hvac>=2.2",
+]
+# BDP_02 item 4 (embed SDK / OEM): the LangChain adapter
+# (secugent/orchestrator/adapters_langchain.py) is an OPTIONAL integration, never a
+# Core dependency (§A-2.3 framework-neutral, invariant I3). The adapter LAZY-imports
+# langchain only when its SecuGentCallbackHandler is actually constructed, so
+# `import secugent.sdk` / `import secugent.core` work with langchain absent. This
+# extra makes the install remedy real: `pip install 'secugent[langchain]'`. We
+# pin >=0.2 (langchain_core split) and also accept the legacy `langchain.callbacks`
+# location at runtime, so either layout satisfies the adapter.
+langchain = [
+    "langchain-core>=0.2",
+]
+
+# BDP_01 item 2 reserves the `secugent` console entry point; item 3 extends the
+# same dispatcher with `run`/`demo`. Today it dispatches the read-only `verify`
+# subcommand (determinism + audit-chain proofs).
+[project.scripts]
+secugent = "secugent.cli.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["secugent*"]
+# BDP_01 item 1 (open-core, invariant I2 — license boundary): the BSL-1.1
+# Enterprise tier (secugent/enterprise/*: AwsKmsProvider/VaultTransitProvider,
+# multitenant tenant_admin) must NOT ship inside the Apache-2.0 Core wheel.
+# Without "secugent.enterprise*" here the `secugent*` glob would package the
+# commercial BSL-1.1 modules into the slim `pip install secugent` Core install,
+# physically mixing licenses. Enforced by
+# tests/unit/test_open_core_boundary.py::test_core_wheel_excludes_enterprise_packages.
+exclude = ["tests*", "ui*", "regulations_examples*", "scripts*", "secugent.enterprise*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101", "E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency/parameter markers are evaluated once at import as call-site
+# defaults BY DESIGN — they are not the B008 "mutable default" footgun. Treat them as
+# immutable so the idiomatic ``param = Depends(...)`` / ``= Header(...)`` signatures
+# (used throughout secugent/api) lint clean instead of emitting B008 false positives.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Header",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Cookie",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S105", "S106", "S107"]
+# G-H14: Alembic-generated migration scaffolding. ``env.py`` runs side-effecting
+# module-level code after imports (E402); revision files keep alembic's template
+# header order. Security rules (S*) are deliberately NOT relaxed here.
+"migrations/env.py" = ["E402"]
+"migrations/versions/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "docker: integration tests that require a reachable Docker daemon",
+    "enterprise: tests that exercise Enterprise-tier (BSL-1.1) code paths",
+]

@@ -1,0 +1,222 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# BDP_05 item 2 — public/private release manifest (secugent-core v0.1.0).
+#
+# This file is the SINGLE SOURCE OF TRUTH for what ships in the public OSS repo.
+# `scripts/check_public_release.py` reads it and enforces, fail-closed:
+#   * deny-by-default  — anything NOT matched by `include` is private (Invariant I4).
+#   * import-closure    — no public .py may import an Enterprise/private package (I2).
+#   * forbidden-content — no internal-strategy doc / secret may reach the public set (I5).
+#
+# Glob semantics (a custom deterministic glob->regex translator, `_glob_to_regex`
+# in check_public_release.py — NOT pathlib.Path.match, whose ** / Hangul handling
+# is version-dependent) against the repo-relative POSIX path:
+#   * "secugent/core/**"  matches every file at any depth under secugent/core/.
+#   * "secugent/config.py" matches exactly that file.
+#   * "**/.env"           matches a `.env` file at any depth (NOT `.env.example`).
+# A path is PUBLIC iff it matches >=1 `include` glob AND 0 `exclude` globs
+# (exclude always wins).
+#
+# DENY-BY-DEFAULT SCOPE (read carefully — I4 is true only at the TOP LEVEL):
+#   A brand-new TOP-LEVEL package/file not named by any `include` glob is private
+#   by default. BUT the broad recursive includes below (e.g. "secugent/core/**",
+#   "docs/security/**", "tests/**", ".github/workflows/**") are ALLOW-BY-DEFAULT
+#   within their subtree: a NEW file dropped under them ships automatically and is
+#   only caught by the content/closure scanners. So a plain-prose internal doc
+#   added under docs/security/ (no forbidden basename/Hangul/secret) could leak.
+#   When adding a high-sensitivity file under a broad include, exclude it
+#   explicitly. Do NOT assume "any new file is automatically safe".
+#
+# MIXED packages (orchestrator/agents/models) are included file-by-file so the
+# Enterprise-coupled members (cost-quota importers) are never selected; they are
+# ALSO listed under `exclude` as defence-in-depth (closure risks R1-R4).
+
+include:
+  # --- Fully-PUBLIC_CORE packages (spec §3.2) ---
+  - "secugent/__init__.py"
+  - "secugent/config.py"
+  - "secugent/core/**"
+  - "secugent/audit/**"
+  - "secugent/steer/**"
+  - "secugent/observability/**"
+  - "secugent/sdk/**"
+  - "secugent/cli/**"
+  - "secugent/regulations/**"
+  - "secugent/tools/**"
+  - "secugent/io/**"
+  - "secugent/prompts/**"
+  - "secugent/deploy/**"
+  # --- MIXED packages — file-level include (spec §3.3) ---
+  # orchestrator: every Core file EXCEPT sub_agent-coupled members. runner.py and
+  # errors.py SHIP: they are import-closed (the optional secugent.cost quota tier
+  # is referenced only under TYPE_CHECKING / lazily on the enforcement path), and
+  # the shipping adapters (adapters.py / a2a_adapter.py / wiring.py / __init__.py)
+  # depend on their cost-free symbols (PlanLike, the planner/dispatcher error
+  # classes) at RUNTIME — excluding them broke standalone import (I8). The cost
+  # *enforcement engine* (CostLedger) stays private in secugent/cost/**.
+  - "secugent/orchestrator/__init__.py"
+  - "secugent/orchestrator/adapters.py"
+  - "secugent/orchestrator/mcp_adapter.py"
+  - "secugent/orchestrator/a2a_adapter.py"
+  - "secugent/orchestrator/adapters_langchain.py"
+  - "secugent/orchestrator/envelope_gate.py"
+  - "secugent/orchestrator/errors.py"
+  - "secugent/orchestrator/events.py"
+  - "secugent/orchestrator/lease.py"
+  - "secugent/orchestrator/recovery.py"
+  - "secugent/orchestrator/runner.py"
+  - "secugent/orchestrator/state.py"
+  - "secugent/orchestrator/wiring.py"
+  # agents: dispatcher/head_agent only (sub_agent.py is cost-quota coupled).
+  - "secugent/agents/__init__.py"
+  - "secugent/agents/dispatcher.py"
+  - "secugent/agents/head_agent.py"
+  # models: catalog only (router.py is cost-ledger coupled).
+  - "secugent/models/__init__.py"
+  - "secugent/models/catalog.py"
+  # --- Project root + docs + tests + tooling ---
+  - "examples/**"
+  - "tests/**"
+  - "scripts/gen_sbom.py"
+  - "scripts/check_public_release.py"
+  - "scripts/extract_public_repo.sh"
+  - "LICENSE"
+  - "LICENSE.enterprise"
+  - "NOTICE"
+  - "SECURITY.md"
+  - "README.md"
+  - "CHANGELOG.md"
+  - "pyproject.toml"
+  - "requirements.txt"
+  - ".gitattributes"
+  - ".gitignore"
+  - "docs/OPEN_CORE.md"
+  - "docs/security/**"
+  - ".github/workflows/**"
+  - "deploy/Dockerfile"
+  - "deploy/docker-compose.yml"
+  - "deploy/.env.example"
+  - "config/models.yaml"
+  - "release/public_manifest.yaml"
+  - "release/PUBLIC_RELEASE_RUNBOOK.md"
+  # Release notes shipped so runbook §6.3 `gh release create --notes-file
+  # release/RELEASE_NOTES_v0.1.0.md` resolves inside the extracted public repo.
+  - "release/RELEASE_NOTES_v0.1.0.md"
+  # --- Governance / contribution infrastructure (BDP_05 item 5) ---
+  # These files are required for an OSS public repo (contributor guide, code of
+  # conduct, issue/PR templates). They contain NO internal strategy or secrets.
+  # release.yml already ships via ".github/workflows/**" above; the four paths
+  # below were missing from include (deny-by-default would have dropped them).
+  - "CONTRIBUTING.md"
+  - "CODE_OF_CONDUCT.md"
+  - ".github/ISSUE_TEMPLATE/**"
+  - ".github/PULL_REQUEST_TEMPLATE.md"
+
+exclude:
+  # --- Fully-ENTERPRISE packages — never public (spec §3.4) ---
+  - "secugent/enterprise/**"
+  - "secugent/compliance/**"
+  - "secugent/cost/**"
+  - "secugent/api/**"
+  - "secugent/evolution/**"
+  - "secugent/identity/**"
+  - "secugent/integrations/**"
+  - "secugent/desktop/**"
+  - "ui/**"
+  # --- MIXED-package Enterprise-coupled files (closure risks R3-R4) ---
+  # sub_agent.py (token-budget enforcement) and models/router.py (cost-ledger
+  # routing) carry real Enterprise logic with an eager module-level
+  # ``from secugent.cost.accounting import ...`` and stay private. Their only
+  # PUBLIC consumers reference them annotation-only / by lazy re-export
+  # (agents/dispatcher.py under TYPE_CHECKING; models/__init__.py via PEP 562
+  # __getattr__), so the public set stays import-closed without them.
+  # NOTE: runner.py / errors.py are NOT excluded — they were made import-closed
+  # and now ship (see include above); the excluded-sibling closure check would
+  # otherwise flag every public file that imports them at runtime.
+  - "secugent/agents/sub_agent.py"
+  - "secugent/models/router.py"
+  # --- Internal-strategy / process docs (closure risks R7, R8) ---
+  - "CLAUDE.md"
+  - "SECURITY_CONTRACT.md"
+  - "DEPLOY_PROGRESS.md"
+  - "report_1.md"
+  - "Review/**"
+  - "BDP_REFORMED/**"
+  - "docs/specs/**"
+  # --- Korean-named strategy artifacts (closure risk R12) ---
+  # fnmatch-style unicode globs; the scanner ALSO checks an explicit Hangul
+  # substring list so a glob-engine quirk cannot let these leak.
+  - "**/*시장진단*"
+  - "**/*로우리스크*"
+  - "**/*전략*"
+  # --- Local state / scratch / secrets (closure risks R5, R11) ---
+  - ".secugent/**"
+  - "data/**"
+  - ".claude/**"
+  - "**/.env"
+  - "**/*.key"
+  - "**/*.pem"
+
+  # --- Private-mirror TEST suites (deny-by-default for I2/I8) ---
+  # `tests/**` is a broad include, but a test that imports a private tier cannot
+  # ship: it would not even import in the standalone public repo (Invariant I8,
+  # "pip install . && pytest -q"). These directories test ONLY private packages
+  # (api/cost/enterprise/compliance/identity) and are excluded wholesale.
+  - "tests/api/**"
+  - "tests/cost/**"
+  - "tests/enterprise/**"
+  - "tests/compliance/**"
+  - "tests/identity/**"
+  - "tests/integrations/**"
+  # D1-deferred-tier test suites: these import secugent.evolution / secugent.desktop,
+  # whose source is excluded from the public set. Shipping them would break the
+  # standalone `pytest -q` (ModuleNotFoundError) and leak deferred-tier internals.
+  # The expanded import-closure deny-set (FORBIDDEN_IMPORT_PREFIXES) now also
+  # catches these automatically; they are enumerated here as defence-in-depth.
+  - "tests/evolution/**"
+  - "tests/unit/test_desktop_factory.py"
+  - "tests/unit/test_desktop_security.py"
+  - "tests/unit/test_stub_backend.py"
+  # MIXED test dirs — exclude only the individual files that import a private
+  # tier (the Core tests in the same dir still ship). Enumerated by the AST
+  # closure scan over tests/ (BDP_05 item 2).
+  - "tests/audit/test_kms_providers.py"
+  - "tests/audit/test_merkle_root_kms_signed.py"
+  - "tests/models/test_cascade_router.py"
+  - "tests/orchestrator/test_runner_quota.py"
+  - "tests/steer/test_steer_failed_hash_chain.py"
+  - "tests/steer/test_steer_hash_chain.py"
+  - "tests/unit/api/**"
+  - "tests/integration/**"
+  # Deploy tests exercise the full HA / air-gap bundle (helm/**, airgap/**,
+  # postgres/**, constraints.txt, docker-compose.dev.yml) — none of which ship in
+  # the public deploy set (only Dockerfile + docker-compose.yml + .env.example
+  # do). They read those excluded files unconditionally, so under the extracted
+  # repo they would FileNotFoundError. They test Enterprise-only deploy artifacts
+  # and are excluded wholesale (BDP_05 item 2 fixer round 2).
+  - "tests/deploy/**"
+  # Tests that import the private SUB agent (secugent.agents.sub_agent — token-
+  # budget enforcement, eager secugent.cost import, NOT shipped). They would
+  # ModuleNotFoundError under the extracted repo's `pytest -q` (Invariant I8).
+  # The excluded-sibling import-closure check now flags these automatically; they
+  # are enumerated here as the primary deny (BDP_05 item 2 fixer round 2).
+  - "tests/agents/test_dispatcher_envelope.py"
+  - "tests/agents/test_dispatcher_parallel.py"
+  - "tests/agents/test_envelope_threading.py"
+  - "tests/agents/test_sub_agent_envelope.py"
+  - "tests/core/test_rule_of_two_axis1.py"
+  - "tests/core/test_rule_of_two_scenario.py"
+  - "tests/orchestrator/test_adapter_envelope.py"
+  - "tests/orchestrator/test_adapters.py"
+  - "tests/regulations/test_per_run_oversight_differential.py"
+  - "tests/sdk/test_gate_hardening.py"
+  - "tests/unit/test_head_agent.py"
+  - "tests/unit/test_sub_agent.py"
+  # Test fixtures that embed real-shaped secret literals (sk-…, xoxb-…, signing
+  # secrets). Even fake tokens must not ship in the public set (Invariant I5):
+  # they degrade the value of the secret gate and look like a leak in an OSS repo.
+  - "tests/audit/test_hash_chain_tampering.py"
+  - "tests/observability/test_tracing_sanitizer.py"
+  - "tests/unit/test_event_store.py"
+  - "tests/unit/io/test_connector_action_step.py"
+  - "tests/unit/io/test_credential_broker.py"

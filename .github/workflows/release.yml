@@ -1,0 +1,287 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# BDP_05 item 5 — Signed release pipeline (secugent-core v0.1.0).
+#
+# Trigger: push of a semver tag matching "v*" (e.g. v0.1.0).
+# Non-tag pushes to main are handled by secugent.yml / determinism.yml.
+#
+# Job ordering (fail-closed — I2):
+#   gate  →  build  →  publish  →  sign-release
+#
+# * publish and sign-release never run unless gate AND build both succeeded.
+# * The release-check gate (python scripts/check_public_release.py) is a
+#   REQUIRED step inside the gate job. PyPI trusted publishing (OIDC, no API
+#   token) is used for publish — the PyPI trusted publisher must be configured
+#   in the PyPI project settings before the first release:
+#     Trusted publisher: GitHub Actions
+#     Repository owner:  <org>
+#     Repository name:   secugent
+#     Workflow filename: release.yml
+#     Environment name:  pypi
+#
+# Minimal-permissions model:
+#   default: contents: read (read-only for all jobs not listed)
+#   id-token: write — ONLY on publish (OIDC to PyPI) and sign-release (sigstore)
+#   contents: write — ONLY on sign-release (creates GitHub Release)
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Default: read-only. Each job that needs more declares it explicitly.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # gate — all §B-9 local gates + release-check (I2: must pass before build)
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Format check (ruff format)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy secugent
+
+      - name: Pytest (unit + enterprise + integration + release + ops)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: >-
+          pytest
+          tests/unit
+          tests/enterprise
+          tests/release
+          tests/ops
+          -q
+          --cov=secugent
+          --cov-fail-under=85
+
+      # REQUIRED before publish — import-closure + secret + strategy-doc scan.
+      # Exit non-zero means at least one invariant (I2/I4/I5) is violated;
+      # the needs chain ensures publish never runs in that case.
+      - name: Public-release gate (check_public_release.py)
+        run: python scripts/check_public_release.py
+
+      # Verify version tag matches pyproject.toml (edge case §5.5 version mismatch).
+      - name: Assert tag version == pyproject.toml version
+        run: |
+          python - <<'PY'
+          import tomllib, sys
+          with open("pyproject.toml", "rb") as f:
+              meta = tomllib.load(f)
+          pkg_version = meta["project"]["version"]
+          tag = "${{ github.ref_name }}".lstrip("v")
+          if pkg_version != tag:
+              print(f"ERROR: tag v{tag} != pyproject.toml version {pkg_version}")
+              sys.exit(1)
+          print(f"version OK: {pkg_version}")
+          PY
+
+  # ---------------------------------------------------------------------------
+  # build — produce wheel + sdist + SBOM; assert wheel excludes Enterprise (I3)
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build wheel, sdist, SBOM
+    needs: [gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build + dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          pip install -e ".[dev]"
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Generate SBOM (CycloneDX, deterministic)
+        # Write SBOM into sbom/ (separate from dist/) so the publish job can
+        # download only the distributions. pypa/gh-action-pypi-publish (twine)
+        # rejects any non-distribution file in packages-dir — sbom.json would
+        # cause "InvalidDistribution: Unknown distribution format: 'sbom.json'".
+        run: |
+          mkdir -p sbom
+          python scripts/gen_sbom.py --output sbom/sbom.json
+
+      # Assert open-core boundary: the wheel must NOT contain Enterprise packages.
+      # This is Invariant I3 and is tested by test_open_core_boundary.py; running
+      # the dedicated test here in the build job provides a tight loop even if
+      # the gate job's broader pytest run is caching results.
+      - name: Assert wheel excludes Enterprise packages (I3)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: pytest tests/unit/test_open_core_boundary.py::test_core_wheel_excludes_enterprise_packages -q
+
+      - name: Upload distributions (wheel + sdist only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          # dist/ contains ONLY wheel + sdist — no sbom.json — so the publish
+          # job's packages-dir is clean for pypa/gh-action-pypi-publish / twine.
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload SBOM (separate artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # publish — PyPI via OIDC trusted publishing (no API token stored in Secrets)
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish to PyPI (OIDC)
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # id-token: write required for OIDC trusted publishing to PyPI.
+    # The GitHub Environment "pypi" gates this job behind any configured
+    # protection rules (e.g. manual approval) — maintainer must create it first.
+    # See: https://docs.pypi.org/trusted-publishers/
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/secugent
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # OIDC trusted publishing — no password or API token needed.
+      # Pre-requisite: the PyPI project "secugent" must have a trusted publisher
+      # configured pointing to this repository + workflow filename + environment.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ---------------------------------------------------------------------------
+  # sign-release — sigstore keyless sign + GitHub Release with all assets
+  # ---------------------------------------------------------------------------
+  sign-release:
+    name: Sign artifacts and create GitHub Release
+    # Must depend on publish so that a failed PyPI upload prevents a GitHub
+    # Release from advertising a package that was never actually published.
+    # Transitive chain: gate → build → publish → sign-release (I2 fail-closed).
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # id-token: write for sigstore OIDC (keyless signing, Rekor transparency log).
+    # contents: write to create the GitHub Release and attach assets.
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      # Keyless signing with sigstore — OIDC ephemeral key, recorded in Rekor.
+      # Anyone can verify: sigstore verify --bundle <file>.sigstore.json <file>
+      # or: cosign verify-blob --bundle <file>.sigstore.json <file>
+      # Wheels/sdist are in dist/, SBOM is in sbom/ (separated to keep publish clean).
+      - name: Sign release artifacts (sigstore keyless)
+        uses: sigstore/gh-action-sigstore-python@v3
+        with:
+          inputs: >-
+            dist/*.whl
+            dist/*.tar.gz
+            sbom/sbom.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "secugent ${{ github.ref_name }}"
+          body: |
+            ## secugent ${{ github.ref_name }}
+
+            ### Trust proof
+
+            This release ships cryptographic provenance:
+
+            * **Sigstore keyless signatures** (`.sigstore.json`) — recorded in the
+              [Rekor](https://rekor.sigstore.dev) public transparency log; verify with:
+              ```
+              sigstore verify --bundle secugent-*.whl.sigstore.json secugent-*.whl
+              ```
+            * **SBOM** (`sbom.json`) — CycloneDX bill of materials, generated
+              deterministically by `python scripts/gen_sbom.py --output sbom/sbom.json`.
+            * **Reproducibility** — two independent SBOM runs produce byte-identical
+              output (CI enforced in `determinism.yml`).
+
+            See [`docs/security/TRUST_PROOF.md`](docs/security/TRUST_PROOF.md) for
+            the full verification procedure, and
+            [`SECURITY.md`](SECURITY.md) for the vulnerability disclosure policy.
+
+            ### Installation
+
+            ```bash
+            pip install secugent
+            ```
+
+            To pin to this exact release (tag `${{ github.ref_name }}`, PyPI version without the leading `v`):
+
+            ```bash
+            # Example: pip install secugent==0.1.0
+            pip install "secugent==$(echo '${{ github.ref_name }}' | sed 's/^v//')"
+            ```
+
+            ### Verify (no API key required)
+
+            ```bash
+            secugent verify
+            ```
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.sigstore.json
+            sbom/sbom.json
+            sbom/*.sigstore.json
+            SECURITY.md
+            docs/security/threat_model.md
+          draft: false
+          prerelease: false

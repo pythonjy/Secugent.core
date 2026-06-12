@@ -1,0 +1,117 @@
+name: determinism-reproduction
+
+# BDP Phase 1 item 2 §2.9: prove the deterministic decision path is externally
+# reproducible — run the determinism proof TWICE in independent processes and
+# assert the produced report (incl. the canonical output digest) is byte-identical
+# across the two runs. Kept aligned with the local gates (CLAUDE.md §B-9).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  determinism:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SEED: tests/cli/fixtures/determinism_seed.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # --- local gates (must match CLAUDE.md §B-9) ---
+      - name: Lint
+        run: ruff check .
+      - name: Format check
+        run: ruff format --check .
+      - name: Type check
+        run: mypy secugent
+      - name: Verify CLI tests
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: pytest tests/cli -q
+
+      # --- determinism reproduction: two independent runs, byte-identical ---
+      - name: Determinism run #1
+        run: |
+          python - <<'PY' > run1.json
+          import dataclasses, json
+          from pathlib import Path
+          from secugent.cli.verify import verify_determinism
+          r = verify_determinism(samples=100, seed_fixture=Path("${{ env.SEED }}"))
+          print(json.dumps(dataclasses.asdict(r), sort_keys=True))
+          PY
+      - name: Determinism run #2
+        run: |
+          python - <<'PY' > run2.json
+          import dataclasses, json
+          from pathlib import Path
+          from secugent.cli.verify import verify_determinism
+          r = verify_determinism(samples=100, seed_fixture=Path("${{ env.SEED }}"))
+          print(json.dumps(dataclasses.asdict(r), sort_keys=True))
+          PY
+      - name: Assert byte-identical across runs
+        run: |
+          echo "run #1:" && cat run1.json
+          echo "run #2:" && cat run2.json
+          diff run1.json run2.json
+          python - <<'PY'
+          import json
+          r1 = json.load(open("run1.json"))
+          r2 = json.load(open("run2.json"))
+          assert r1 == r2, "determinism reports diverged across runs"
+          assert r1["ok"] is True, f"determinism proof failed: {r1}"
+          assert r1["distinct_outputs"] == 1, r1
+          print("determinism reproduced: report byte-identical, distinct_outputs=1")
+          PY
+
+      # --- audit-chain proof via the CLI exit code (fail-closed) ---
+      - name: Audit-chain proof reproduces (built + verified read-only)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from secugent.audit.hash_chain import ChainedEventStore
+          from secugent.core.contracts import Event
+          from secugent.core.event_store import EventStore
+          from secugent.core.tenancy import TenantId
+
+          tmp = Path(tempfile.mkdtemp()) / "events.db"
+          inner = EventStore(tmp)
+          chained = ChainedEventStore(inner)
+          try:
+              for i in range(5):
+                  chained.append_event(
+                      Event(tenant_id=TenantId("financial-kr"), actor="head:planner",
+                            type="approval.granted", run_id=f"배포-{i}",
+                            payload={"메모": f"감사 이벤트 {i}"}))
+          finally:
+              chained.close()
+          print("STORE", tmp)
+          PATH_FILE = Path("store_path.txt"); PATH_FILE.write_text(str(tmp))
+          PY
+          STORE="$(cat store_path.txt)"
+          secugent verify --chain --tenant financial-kr --store "$STORE"
+
+      # --- SBOM determinism: two generations are byte-identical ---
+      - name: SBOM is deterministic
+        run: |
+          python scripts/gen_sbom.py --output sbom1.json
+          python scripts/gen_sbom.py --output sbom2.json
+          diff sbom1.json sbom2.json && echo "SBOM byte-identical across runs"
+
+      # NOTE: GitHub Release creation and asset attachment on v* tags is owned
+      # exclusively by release.yml (sign-release job). This workflow only runs
+      # on branch/PR pushes and performs the determinism proof — it does NOT
+      # create or modify any GitHub Release. Removing the previous tag-gated
+      # asset upload steps prevents the race condition where both determinism.yml
+      # and release.yml tried to create the same release concurrently.

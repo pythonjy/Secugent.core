@@ -1,0 +1,38 @@
+# 전자금융감독규정 (Electronic Financial Supervision Regulation) 통제 패턴 팩
+# 출처: 금융위원회·금융감독원 「전자금융감독규정」
+#   - 제13조(전산자료 보호대책): 계좌정보·거래내역 등 전산자료 외부 유출 차단.
+#   - 제15조(해킹 등 방지대책) / 제37조의2(정보처리 위탁): 금융 PII 외부 전송 통제.
+# 병합 규칙: 이 팩은 strengthen-only(_merge)로 병합되며 완화는 거부된다.
+# 모든 라벨은 한국어 자연어 (§C-3). 기존 Regulations 스키마만 사용 (신규 필드 없음).
+version: "kr-efin-supervision-1.0.0"
+
+banned_paths:
+  - rule_id: "efin-계좌정보-차단"
+    pattern: "*/계좌정보/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "전자금융감독규정 제13조 — 계좌정보 전산자료 접근 차단."
+  - rule_id: "efin-거래내역-차단"
+    pattern: "*/거래내역/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "전자금융감독규정 제13조 — 거래내역 전산자료 접근 차단."
+
+banned_commands:
+  # 계좌정보/거래내역 등 금융 PII를 개인 메일·메신저로 외부 전송하는 명령 차단.
+  - rule_id: "efin-금융pii-외부전송-차단"
+    pattern: "\\b(mail|send|forward|curl\\s+-T|scp|rsync)\\b.*\\b(@gmail\\.com|@naver\\.com|@kakao\\.com|@daum\\.net)\\b"
+    severity: "critical"
+    hard_block: true
+    description: "전자금융감독규정 제15조 — 금융 PII 개인 외부 채널 송신 차단."
+
+data_labels:
+  - rule_id: "efin-라벨-금융pii"
+    label: "금융개인정보"
+    path_patterns: ["*/계좌정보/*", "*/거래내역/*", "*/금융pii/*"]
+    allowed_actions: ["file_read"]
+    severity: "critical"
+    hard_block: true
+    description: "전자금융감독규정 — 금융 PII는 SUB 읽기만 허용, 외부 전송/쓰기 차단."

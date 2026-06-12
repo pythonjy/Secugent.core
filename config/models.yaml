@@ -1,0 +1,70 @@
+# PHASE 11 — approved model catalog (user decision §10.4).
+#
+# Two production models + one mock for tests. Anything else attempting to
+# join the runtime via ``LLM_MODEL_ID`` is rejected by
+# :class:`secugent.models.catalog.ModelCatalog.is_approved` (fail-closed
+# boot).
+#
+# Costs reflect the Anthropic public pricing at the time of writing. PHASE 12
+# EVOLUTION can produce PRs that update this file after change-management
+# review.
+
+models:
+  - model_id: claude-haiku-4-5-20251001
+    provider: anthropic
+    version: "4.5"
+    approved_at: 2026-05-01T00:00:00Z
+    risk_level: low
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.00025"
+    cost_per_output_1k: "0.00125"
+
+  - model_id: claude-sonnet-4-6
+    provider: anthropic
+    version: "4.6"
+    approved_at: 2026-05-01T00:00:00Z
+    risk_level: medium
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.003"
+    cost_per_output_1k: "0.015"
+
+  - model_id: mock-test-model
+    provider: mock
+    version: "1.0"
+    approved_at: 2026-05-01T00:00:00Z
+    risk_level: low
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.0"
+    cost_per_output_1k: "0.0"
+
+  # Korean domestic / sovereign models (on-premise / airgap deployments).
+  # Pricing is on-premise (TBD); costs set to 0.0 until per-deployment billing
+  # is configured. Endpoints supplied via SECUGENT_DOMESTIC_MODEL_ENDPOINT or
+  # LLMSettings.domestic_model_endpoint.
+
+  - model_id: exaone-3.5-7.8b-instruct
+    provider: local_exaone
+    version: "3.5"
+    approved_at: 2026-06-07T00:00:00Z
+    risk_level: medium
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.0"
+    cost_per_output_1k: "0.0"
+
+  - model_id: hyperclova-x-seed
+    provider: hyperclova
+    version: "seed"
+    approved_at: 2026-06-07T00:00:00Z
+    risk_level: medium
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.0"
+    cost_per_output_1k: "0.0"
+
+  - model_id: solar-10.7b-v1.0
+    provider: solar
+    version: "1.0"
+    approved_at: 2026-06-07T00:00:00Z
+    risk_level: low
+    allowed_tenants: "*"
+    cost_per_input_1k: "0.0"
+    cost_per_output_1k: "0.0"

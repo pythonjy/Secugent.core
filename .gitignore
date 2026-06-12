@@ -1,0 +1,46 @@
+# Python build / cache artifacts
+__pycache__/
+*.pyc
+
+# Test / coverage / type-check caches
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Local runtime databases (durable store / audit DB)
+.secugent/*.db
+.secugent/*.db-shm
+.secugent/*.db-wal
+
+# Default run-state / lease sqlite location (OrchestratorConfig.run_state_db_path
+# defaults to data/run_state.db; the W1 boot wiring upgrades prod's in-memory
+# default to a durable sqlite store here). Runtime data, never committed.
+data/
+
+# Environment secret files — NEVER commit real secrets. deploy/.env.example
+# tells operators to `cp .env.example .env` and fill in real POSTGRES_PASSWORD
+# / VAULT_TOKEN / ANTHROPIC_API_KEY / GRAFANA_PASSWORD, so the resulting .env
+# must stay out of history (SECURITY_CONTRACT §6 / §10.6). The negation keeps
+# the *.example templates tracked.
+**/.env
+!**/.env.example
+
+# Agent worktrees (physical cleanup handled by merger post-merge)
+.claude/worktrees/
+
+# Frontend dependencies / build output
+ui/node_modules/
+ui/*.err.log
+ui/*.out.log
+ui/tsconfig.tsbuildinfo
+
+# Orchestration / baseline scratch artifacts (not source)
+.vite/
+.baseline_pytest.txt
+.bdp_baseline_failures.txt
+.bdp*_workflow.js
+
+# Personal (non-shared) Claude Code settings — shared config is settings.json
+.claude/settings.local.json

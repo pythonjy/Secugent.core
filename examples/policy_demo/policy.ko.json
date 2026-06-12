@@ -1,0 +1,30 @@
+{
+  "version": "policy-demo-ko-1.0.0",
+  "banned_paths": [
+    {
+      "rule_id": "대외비-디렉터리-차단",
+      "pattern": "*/대외비/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "대외비 디렉터리에 대한 모든 접근은 결정적으로 차단된다."
+    },
+    {
+      "rule_id": "개인정보-내보내기-차단",
+      "pattern": "*/개인정보/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "개인정보보호법 대상 데이터의 외부 반출은 HARD BLOCK."
+    }
+  ],
+  "banned_commands": [
+    {
+      "rule_id": "루트-삭제-차단",
+      "pattern": "rm\\s+-rf\\s+/",
+      "severity": "critical",
+      "hard_block": true,
+      "description": "루트 전체 삭제 명령은 차단된다."
+    }
+  ]
+}

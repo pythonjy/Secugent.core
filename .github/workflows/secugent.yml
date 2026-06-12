@@ -1,0 +1,79 @@
+name: secugent
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Lint
+        run: ruff check .
+      - name: Type check
+        run: mypy --strict secugent/
+      - name: Unit + deterministic-module tests + coverage
+        env:
+          ANTHROPIC_API_KEY: ""
+        # BDP_01 item 1: the tenant_admin authorization gate (deny-by-default,
+        # cross-tenant escalation) was MOVED out of tests/unit into tests/enterprise
+        # by the open-core boundary. testpaths in pyproject does NOT apply when CI
+        # passes explicit path args (they override it), so without naming
+        # tests/enterprise here the security-critical authorization suite would be
+        # untested in CI. (tests/audit + tests/core run via the Integration step /
+        # determinism.yml; tests/property is intentionally NOT added here — it holds
+        # a pre-existing hypothesis-found effects.py NEL edge bug tracked for item 14d.)
+        run: >-
+          pytest tests/unit tests/enterprise
+          --cov=secugent --cov-fail-under=85
+      - name: Deterministic-module coverage gate (§B-4a, tenant_admin >=95%)
+        env:
+          ANTHROPIC_API_KEY: ""
+        # §B-4a mandates >=95% line coverage on the deterministic authorization
+        # module. After the open-core move tenant_admin lives in tests/enterprise;
+        # this dedicated step restores that gate so a dropped platform-admin /
+        # cross-tenant-escalation check fails CI.
+        run: >-
+          pytest tests/enterprise
+          --cov=secugent.enterprise.tenant_admin --cov-fail-under=95
+      - name: Integration tests
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: pytest tests/integration
+      - name: Validate regulations examples
+        run: python scripts/validate_regulations.py regulations_examples/
+
+  # BDP_05 item 2/3/4: the public-release fail-closed gate and its deterministic
+  # test suites (manifest closure/secret/100x-determinism + determinism.yml
+  # structure) are NOT collected by the `test` job's path-scoped pytest args, so
+  # without this dedicated job they would be dead in CI (the exact failure the
+  # boundary gate's placement comment warns about). This restores the §B-9 local
+  # release gate in CI on every push/PR.
+  release-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Public-release gate (import-closure + secret + strategy-doc scan)
+        run: python scripts/check_public_release.py
+      - name: Release + ops test suites (manifest determinism, workflow structure)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: pytest tests/release tests/ops -q

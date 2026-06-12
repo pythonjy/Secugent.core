@@ -1,0 +1,43 @@
+# 개인정보보호법 (Personal Information Protection Act, PIPA) 통제 패턴 팩
+# 출처: 「개인정보 보호법」
+#   - 제23조(민감정보 처리 제한) / 제24조(고유식별정보 처리 제한): 고유식별정보 통제.
+#   - 제37조의2(자동화된 결정에 대한 정보주체의 권리): 자동화 의사결정 통제·설명요구권.
+# 병합 규칙: strengthen-only(_merge), 완화 거부. 한국어 라벨 (§C-3).
+version: "kr-pipa-1.0.0"
+
+banned_paths:
+  - rule_id: "pipa-고유식별정보-차단"
+    pattern: "*/고유식별정보/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "개인정보보호법 제24조 — 주민등록번호 등 고유식별정보 접근 차단."
+  - rule_id: "pipa-민감정보-차단"
+    pattern: "*/민감정보/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "개인정보보호법 제23조 — 민감정보(건강·사상 등) 접근 차단."
+  - rule_id: "pipa-자동화결정-로그-쓰기차단"
+    pattern: "*/자동화의사결정/*"
+    actions: ["file_write", "desktop"]
+    severity: "high"
+    hard_block: true
+    description: "개인정보보호법 제37조의2 — 자동화 의사결정 기록 무단 변조 차단."
+
+banned_commands:
+  # 고유식별정보(주민등록번호 등)의 외부 전송 명령 차단.
+  - rule_id: "pipa-고유식별정보-외부전송-차단"
+    pattern: "\\b(scp|rsync|curl\\s+-T|ftp|sftp)\\b"
+    severity: "critical"
+    hard_block: true
+    description: "개인정보보호법 제24조 — 고유식별정보 외부 전송 차단."
+
+data_labels:
+  - rule_id: "pipa-라벨-고유식별정보"
+    label: "고유식별정보"
+    path_patterns: ["*/고유식별정보/*", "*/주민등록번호/*"]
+    allowed_actions: ["file_read"]
+    severity: "critical"
+    hard_block: true
+    description: "개인정보보호법 — 고유식별정보는 읽기만 허용, 외부 전송/쓰기 차단."

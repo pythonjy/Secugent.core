@@ -1,0 +1,38 @@
+# 신용정보법 (Credit Information Use and Protection Act) 통제 패턴 팩
+# 출처: 「신용정보의 이용 및 보호에 관한 법률」
+#   - 제15조(수집·이용): 개인신용정보 수집·이용 최소화.
+#   - 제32조(제3자 제공): 개인신용정보 제3자 제공 동의·통제.
+#   - 제33조(이용 제한) / 제40조(신용정보회사 행위규칙): 신용평가 정보 오·남용 차단.
+# 병합 규칙: strengthen-only(_merge), 완화 거부. 한국어 라벨 (§C-3).
+version: "kr-credit-info-1.0.0"
+
+banned_paths:
+  - rule_id: "credit-개인신용정보-차단"
+    pattern: "*/개인신용정보/*"
+    actions: ["file_read", "file_write", "desktop"]
+    severity: "critical"
+    hard_block: true
+    description: "신용정보법 제15조 — 개인신용정보 전산자료 무단 접근 차단."
+  - rule_id: "credit-신용평가모델-쓰기차단"
+    pattern: "*/신용평가모델/*"
+    actions: ["file_write", "desktop"]
+    severity: "high"
+    hard_block: true
+    description: "신용정보법 제40조 — 신용평가 모델 파일 직접 수정 차단."
+
+banned_commands:
+  # 개인신용정보를 외부로 대량 제공/전송하는 명령 차단 (제3자 제공 통제, 제32조).
+  - rule_id: "credit-제3자제공-대량전송-차단"
+    pattern: "\\b(scp|rsync|curl\\s+-T|ftp|sftp)\\b"
+    severity: "critical"
+    hard_block: true
+    description: "신용정보법 제32조 — 개인신용정보 외부 대량 전송(제3자 제공) 차단."
+
+data_labels:
+  - rule_id: "credit-라벨-개인신용정보"
+    label: "개인신용정보"
+    path_patterns: ["*/개인신용정보/*", "*/신용등급/*"]
+    allowed_actions: ["file_read"]
+    severity: "critical"
+    hard_block: true
+    description: "신용정보법 — 개인신용정보는 읽기만 허용, 제3자 제공/쓰기 차단."

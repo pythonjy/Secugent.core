@@ -1,0 +1,21 @@
+# Normalize all text files to LF in the repo and working tree.
+# This project is developed/tested/deployed on Linux (CI, Docker, air-gap) and
+# every file was committed with LF. Editors on Windows must not reintroduce
+# CRLF: doing so flips every line and shows hundreds of phantom "changes".
+# git now enforces LF on add and checkout regardless of host OS.
+* text=auto eol=lf
+
+# Explicit binaries — never line-ending normalized.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.whl  binary
+*.db   binary
+*.xlsx binary
+*.docx binary
+*.pptx binary

@@ -377,10 +377,20 @@ def test_excluded_existing_files_excludes_public_and_keeps_private(
 
     files = public_files(manifest, REPO_ROOT)
     excluded = _excluded_existing_files(manifest, REPO_ROOT, files)
-    assert "secugent/agents/sub_agent.py" in excluded
-    assert "secugent/models/router.py" in excluded
-    assert "secugent/api/main.py" in excluded
-    # Now-shipping files must NOT be in the excluded-existing set.
+    # ``_excluded_existing_files`` reports present-but-excluded sources, so its
+    # positive membership only holds where the private file is physically on disk
+    # (the monorepo). In a standalone public extract these private tiers are absent
+    # by manifest exclusion — their absence from the set is CORRECT, not a failure.
+    # Assert membership only for the files that actually exist here.
+    for private in (
+        "secugent/agents/sub_agent.py",
+        "secugent/models/router.py",
+        "secugent/api/main.py",
+    ):
+        if (REPO_ROOT / private).is_file():
+            assert private in excluded, private
+    # Now-shipping files must NOT be in the excluded-existing set (Core assertion —
+    # holds in both the monorepo and the extract).
     assert "secugent/orchestrator/runner.py" not in excluded
     assert "secugent/orchestrator/errors.py" not in excluded
     assert "secugent/core/regulations.py" not in excluded

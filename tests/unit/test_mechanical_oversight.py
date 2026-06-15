@@ -39,6 +39,13 @@ from secugent.core.regulations import (
 # ---------------------------------------------------------------------------
 
 
+_REGULATIONS_EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "regulations_examples"
+_requires_examples = pytest.mark.skipif(
+    not _REGULATIONS_EXAMPLES_DIR.is_dir(),
+    reason="regulations_examples fixtures not shipped in public core",
+)
+
+
 def _engine_from_default() -> OversightEngine:
     path = Path(__file__).resolve().parents[2] / "regulations_examples" / "default.json"
     return OversightEngine(load_regulations(path))
@@ -389,6 +396,7 @@ def test_unknown_action_blocked() -> None:
     assert res.violation.category == "unknown_action"
 
 
+@_requires_examples
 def test_no_target_no_match() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(action_type="compute", target=None, command="echo hi"))
@@ -448,12 +456,14 @@ def test_session_patch_adds_banned_command() -> None:
 # ---------------------------------------------------------------------------
 
 
+@_requires_examples
 def test_default_blocks_confidential_dir() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(target="D:/team/confidential/plan.docx"))
     assert res.hard_block is True
 
 
+@_requires_examples
 def test_default_blocks_rm_rf() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(action_type="compute", command="rm -rf /"))

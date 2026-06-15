@@ -621,8 +621,11 @@ def test_every_top_level_package_has_a_tier() -> None:
         f"{sorted(unclassified)}"
     )
 
-    # 선언된 패키지가 모두 디스크에 실제 존재하는지 검증 (환상 등재 = fail)
-    phantom = classified - actual
+    # 선언된 패키지가 디스크에 실제 존재하는지 검증 (환상 등재 = fail).
+    # 단, 공개 standalone 추출본에서는 Enterprise 티어 패키지가 manifest로 제외돼
+    # 디스크에 부재하는 것이 정상(올바른 분리)이므로 phantom 실패로 보지 않는다.
+    # Core 패키지가 부재하면 여전히 실패 — Core는 반드시 함께 배포돼야 한다.
+    phantom = (classified - actual) - ENTERPRISE_PACKAGES
     assert not phantom, (
         f"티어 상수에 등재됐으나 디스크에 존재하지 않는 패키지(오타 또는 삭제 후 미정리): {sorted(phantom)}"
     )

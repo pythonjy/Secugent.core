@@ -38,6 +38,29 @@ jobs:
           ANTHROPIC_API_KEY: ""
         run: pytest tests/cli -q
 
+      # --- §B-4a deterministic-module coverage floor (95% LINE) ---
+      # The flat 80% floor in secugent.yml's `test` job no longer enforces the
+      # per-module 95% line-coverage gate that §B-4a requires for the
+      # *deterministic* trust core (it had targeted the now-absent enterprise
+      # tenant_admin, so a Core deterministic-coverage regression would not fail
+      # CI). This step restores that floor over exactly the SHIPPED deterministic
+      # modules so a drop below 95% on any of them fails the build. Threshold is
+      # 95 because all six currently meet it (measured: hash_chain 100, merkle 97,
+      # approval 99, mechanical_oversight 99, regulations 100, rule_of_two 100 —
+      # aggregate 99%). Do NOT lower this without a §B-4a waiver.
+      - name: Deterministic-module coverage floor (§B-4a, 95% line)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: >-
+          pytest
+          --cov=secugent.core.mechanical_oversight
+          --cov=secugent.core.regulations
+          --cov=secugent.core.approval
+          --cov=secugent.core.rule_of_two
+          --cov=secugent.audit.hash_chain
+          --cov=secugent.audit.merkle
+          --cov-fail-under=95 -q
+
       # --- determinism reproduction: two independent runs, byte-identical ---
       - name: Determinism run #1
         run: |

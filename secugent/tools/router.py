@@ -263,12 +263,17 @@ class ToolRouter:
 
         if action == "compute":
             # No real compute backend in v0.1 — backend stub for repeatability.
-            return self._require_backend().execute_step(step)
+            # Narrow at the call site: the desktop protocol (secugent.desktop.base)
+            # is an excluded tier in the public core, so execute_step is typed Any.
+            result: builtin.ToolResult = self._require_backend().execute_step(step)
+            return result
 
         if action == "desktop":
             if not self._config.enable_real_desktop:
-                # Fall back to the virtual desktop sandbox.
-                return self._require_backend().execute_step(step)
+                # Fall back to the virtual desktop sandbox. Narrow at the call site
+                # (excluded desktop tier types execute_step as Any in public core).
+                fallback_result: builtin.ToolResult = self._require_backend().execute_step(step)
+                return fallback_result
             driver = self._config.real_desktop_driver
             if driver is None:
                 raise RealDesktopDisabledError("real desktop enabled but no driver configured")

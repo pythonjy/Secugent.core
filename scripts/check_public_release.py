@@ -35,13 +35,16 @@ non-zero if *any* of them is violated (fail-closed — silence is never success)
   HTMLs, …) and no real secret (API key / token / password / ``.env``) may
   appear in the public set. Documented placeholders (``change-me-*``) are not
   secrets. Beyond file NAMES, the prose of every shipped public document
-  (``.md``/``.txt``/``.rst``/``.yaml`` at the repo root or under
+  (``.md``/``.txt``/``.rst``/``.yaml``/``.sh`` at the repo root or under
   ``docs/``/``release/``) is scanned for UNAMBIGUOUS internal tokens
-  (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``Review/``,
-  ``docs/specs/``): a clean path is not enough — a CHANGELOG/runbook body line can
-  still name-drop the private tree (CHG-2). The two boundary-machinery files
-  (``release/public_manifest.yaml``, ``release/PUBLIC_RELEASE_RUNBOOK.md``) that
-  must name the excluded paths are tightly allowlisted.
+  (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``BDP_0``,
+  ``Review/``, ``docs/specs/``): a clean path is not enough — a CHANGELOG/runbook
+  body line can still name-drop the private tree (CHG-2). The three boundary-
+  machinery files (``release/public_manifest.yaml``,
+  ``release/PUBLIC_RELEASE_RUNBOOK.md``, ``scripts/extract_public_repo.sh``) that
+  must name the excluded paths are exempted PER-TOKEN (only their legitimately-
+  needed category tokens), never whole-file — so a genuine private-path leak
+  (``Project_Secugent``) in any of them still fails closed.
 
 CRITICAL: every check operates on the *manifest-selected* public set, NOT the
 whole repo. The live repo deliberately still contains CLAUDE.md / Review/ /
@@ -143,6 +146,9 @@ _FORBIDDEN_HANGUL_SUBSTRINGS: Final[tuple[str, ...]] = ("시장진단", "로우�
 #
 # * ``Project_Secugent`` — the private source-repo directory name (no public use);
 # * ``DEPLOY_PROGRESS`` / ``BDP_REFORMED`` — internal process/roadmap artifacts;
+# * ``BDP_0`` — the ``BDP_01``/``BDP_02``/``BDP_05`` internal process-artifact
+#   name family (broader than the single ``BDP_REFORMED``; catches every numbered
+#   build-deploy-plan reference);
 # * ``Review/`` / ``docs/specs/`` — internal-only path prefixes.
 #
 # Checked as DIRECT substrings (mirroring :data:`_FORBIDDEN_HANGUL_SUBSTRINGS`),
@@ -155,29 +161,55 @@ _FORBIDDEN_PROSE_SUBSTRINGS: Final[tuple[str, ...]] = (
     "Project_Secugent",
     "DEPLOY_PROGRESS",
     "BDP_REFORMED",
+    "BDP_0",
     "Review/",
     "docs/specs/",
 )
 
-# Public text files that legitimately CONTAIN the forbidden prose tokens because
-# their whole job is to DEFINE / VERIFY the open-core boundary, where naming the
-# excluded paths is unavoidable and correct:
+# Tokens that NO file may ever carry in its prose, regardless of any per-file
+# exemption: the private source-repo directory name has zero legitimate public
+# use (not even the boundary-machinery files name it — the runbook refers to the
+# source repo as ``<private-source-repo>``). Kept as a tuple so the per-file
+# exemption cannot accidentally suppress a genuine private-path leak (the gap the
+# adversarial review found in the old whole-file allowlist).
+_NEVER_EXEMPT_PROSE_SUBSTRINGS: Final[tuple[str, ...]] = ("Project_Secugent",)
+
+# Per-file PROSE token exemption (replaces the old whole-file allowlist). The
+# three boundary-machinery files below DEFINE / VERIFY the open-core boundary, so
+# naming the *excluded category* paths is unavoidable and correct — but they have
+# NO business naming the private source tree. Mapping each file to ONLY the
+# category tokens it legitimately needs (and STILL scanning it) means a future
+# genuine ``Project_Secugent`` leak in any of them fails closed, while the
+# documented boundary references do not false-positive:
 #
 # * ``release/public_manifest.yaml`` — its ``exclude:`` list literally names
-#   ``Review/**`` / ``docs/specs/**`` / ``DEPLOY_PROGRESS.md`` / ``BDP_REFORMED/**``;
+#   ``Review/**`` / ``docs/specs/**`` / ``DEPLOY_PROGRESS.md`` / ``BDP_REFORMED/**``
+#   and its header comments reference ``BDP_05``;
 # * ``release/PUBLIC_RELEASE_RUNBOOK.md`` — the extraction runbook documents the
 #   ``git log -- <path>`` leak-check commands that grep the *extracted* history for
-#   exactly these tokens and assert the output is empty (proving they did NOT leak).
+#   exactly these tokens and assert the output is empty (proving they did NOT leak);
+# * ``scripts/extract_public_repo.sh`` — the extraction script names the same
+#   leak-scan paths in ``LEAK_SCAN_PATHS`` and ``BDP_05`` in its header. Previously
+#   it escaped the prose gate only because ``.sh`` was absent from the scan
+#   suffixes (an asymmetric accident the review flagged); it is now scanned with
+#   the same tight per-file exemption — so a real ``Project_Secugent`` leak there
+#   now fails closed too.
 #
-# This allowlist is deliberately TIGHT: exactly the two boundary-machinery files,
-# matched by exact repo-relative POSIX path. Every other shipped text file is
-# scanned with zero tolerance. A new file is NOT covered unless added here.
-_PROSE_SCAN_ALLOWLIST: Final[frozenset[str]] = frozenset(
-    {
-        "release/public_manifest.yaml",
-        "release/PUBLIC_RELEASE_RUNBOOK.md",
-    }
-)
+# Each value is the EXACT set of category tokens that file may carry; every other
+# forbidden token (notably ``Project_Secugent``) still trips the gate. Matched by
+# exact repo-relative POSIX path; a NEW file is fully (zero-tolerance) scanned
+# unless added here.
+_PROSE_ALLOWED_TOKENS_BY_FILE: Final[dict[str, frozenset[str]]] = {
+    "release/public_manifest.yaml": frozenset(
+        {"DEPLOY_PROGRESS", "BDP_REFORMED", "BDP_0", "Review/", "docs/specs/"}
+    ),
+    "release/PUBLIC_RELEASE_RUNBOOK.md": frozenset(
+        {"DEPLOY_PROGRESS", "BDP_REFORMED", "BDP_0", "Review/", "docs/specs/"}
+    ),
+    "scripts/extract_public_repo.sh": frozenset(
+        {"DEPLOY_PROGRESS", "BDP_REFORMED", "BDP_0", "Review/", "docs/specs/"}
+    ),
+}
 
 # Repo-relative top-level directories whose shipped text files carry public-facing
 # prose worth scanning for internal tokens, plus the repo root itself. Scoped this
@@ -186,9 +218,14 @@ _PROSE_SCAN_ALLOWLIST: Final[frozenset[str]] = frozenset(
 # ``.yaml`` fixtures and test data are out of scope for the PROSE gate.
 _PROSE_SCAN_TOP_DIRS: Final[frozenset[str]] = frozenset({"docs", "release"})
 # File extensions a public *document* uses (a subset of _TEXT_SUFFIXES). The prose
-# gate scans only these; code/config text (``.py``, ``.toml``, ``.sh`` …) is not a
-# narrative surface and is covered by the closure/secret gates instead.
-_PROSE_SCAN_SUFFIXES: Final[frozenset[str]] = frozenset({".md", ".txt", ".rst", ".yaml"})
+# gate scans only these; code/config text (``.py``, ``.toml`` …) is not a
+# narrative surface and is covered by the closure/secret gates instead. ``.sh`` is
+# included ONLY because the extraction script is a boundary-machinery file that
+# names the leak-scan paths; it is in :data:`_PROSE_ALLOWED_TOKENS_BY_FILE`, so it
+# is scanned (a real ``Project_Secugent`` leak there fails closed) without
+# false-positiving on its documented category tokens. Any OTHER ``.sh`` under
+# docs/release/root would also be prose-scanned (zero-tolerance) — none ship today.
+_PROSE_SCAN_SUFFIXES: Final[frozenset[str]] = frozenset({".md", ".txt", ".rst", ".yaml", ".sh"})
 
 # Secret-bearing filenames (a literal ``.env`` is a secret store; ``.env.example``
 # is a documented template and is allowed).
@@ -856,14 +893,22 @@ def _secret_filename_reason(rel: str) -> str | None:
 def _is_prose_scan_target(rel: str) -> bool:
     """True if ``rel`` is a shipped public *document* the prose gate must scan.
 
-    In scope: ``.md`` / ``.txt`` / ``.rst`` / ``.yaml`` files that live at the repo
-    root or under ``docs/`` / ``release/`` (where curated narrative lives), EXCEPT
-    the tightly-scoped :data:`_PROSE_SCAN_ALLOWLIST` boundary-machinery files. Out
-    of scope: source-tree config/fixtures and code text (covered by the closure /
-    secret gates), which are not a public-facing narrative surface.
+    In scope:
+
+    * the boundary-machinery files in :data:`_PROSE_ALLOWED_TOKENS_BY_FILE` — they
+      ARE scanned (each with its tight per-file token exemption), unlike the old
+      whole-file allowlist that skipped them entirely. This is what makes a future
+      genuine ``Project_Secugent`` leak in the manifest / runbook / extract script
+      fail closed. ``scripts/extract_public_repo.sh`` is in scope ONLY via this
+      branch (it sits under ``scripts/``, outside the docs/release/root scope);
+    * ``.md`` / ``.txt`` / ``.rst`` / ``.yaml`` / ``.sh`` files that live at the
+      repo root or under ``docs/`` / ``release/`` (where curated narrative lives).
+
+    Out of scope: source-tree config/fixtures and code text (covered by the
+    closure / secret gates), which are not a public-facing narrative surface.
     """
-    if rel in _PROSE_SCAN_ALLOWLIST:
-        return False
+    if rel in _PROSE_ALLOWED_TOKENS_BY_FILE:
+        return True
     suffix = PurePosixPath(rel).suffix.lower()
     if suffix not in _PROSE_SCAN_SUFFIXES:
         return False
@@ -881,12 +926,27 @@ def _prose_token_reasons(rel: str, text: str) -> list[str]:
     line for each token in :data:`_FORBIDDEN_PROSE_SUBSTRINGS`. Reports the file +
     1-based line for each token hit so the leak is locatable. Fail-closed: any hit
     is a violation (the caller turns a non-empty result into a non-zero exit).
+
+    Per-file exemption (:data:`_PROSE_ALLOWED_TOKENS_BY_FILE`): a boundary-machinery
+    file may carry ONLY the category tokens explicitly mapped to it (e.g. the
+    manifest naming ``Review/`` in its ``exclude:`` list). The exemption is applied
+    token-by-token, NOT whole-file — so a token NOT in the file's allowed set still
+    trips the gate. The tokens in :data:`_NEVER_EXEMPT_PROSE_SUBSTRINGS`
+    (``Project_Secugent``) are unconditionally enforced: no per-file mapping can
+    suppress them, closing the whole-file-allowlist gap the review found.
     """
+    allowed = _PROSE_ALLOWED_TOKENS_BY_FILE.get(rel, frozenset())
     reasons: list[str] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
         for token in _FORBIDDEN_PROSE_SUBSTRINGS:
-            if token in line:
-                reasons.append(f"internal token {token!r} in shipped prose {rel}:{line_no}")
+            if token not in line:
+                continue
+            # A token in the file's allowed set is suppressed ONLY when it is not
+            # also a never-exempt token (defence-in-depth: even a mis-configured
+            # allowed set can never green-light a Project_Secugent leak).
+            if token in allowed and token not in _NEVER_EXEMPT_PROSE_SUBSTRINGS:
+                continue
+            reasons.append(f"internal token {token!r} in shipped prose {rel}:{line_no}")
     return reasons
 
 
@@ -899,12 +959,15 @@ def scan_forbidden_content(files: list[Path]) -> list[str]:
       Korean strategy HTMLs, etc., by basename/path/Hangul-substring (so a
       manifest glob mistype cannot let them leak).
     * **internal prose tokens** (CHG-2) — UNAMBIGUOUS internal tokens
-      (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``Review/``,
-      ``docs/specs/``) appearing in the BODY of a shipped public document
-      (``.md``/``.txt``/``.rst``/``.yaml`` at the repo root or under
-      ``docs/``/``release/``). A clean path is not enough — a CHANGELOG/runbook
-      line can still name-drop the private tree. The two boundary-machinery files
-      that legitimately carry these tokens are tightly allowlisted.
+      (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``BDP_0``,
+      ``Review/``, ``docs/specs/``) appearing in the BODY of a shipped public
+      document (``.md``/``.txt``/``.rst``/``.yaml``/``.sh`` at the repo root or
+      under ``docs/``/``release/``, plus the three boundary-machinery files). A
+      clean path is not enough — a CHANGELOG/runbook line can still name-drop the
+      private tree. The boundary-machinery files (manifest, runbook, extract
+      script) are exempted PER-TOKEN, not whole-file: each may carry only the
+      category tokens it legitimately needs, and ``Project_Secugent`` is never
+      exempt anywhere.
     * **secret content** — ``.env``/key files by name, plus credential regexes
       scanned inside every text file. Documented ``change-me-*`` placeholders are
       NOT secrets.

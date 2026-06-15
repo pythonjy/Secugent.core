@@ -24,17 +24,19 @@ verify: determinism OK - 100 runs identical (digest 9b99792311ebcc94)   (exit 0)
 | 모듈 | 역할 | 커버리지 |
 |------|------|---------:|
 | `secugent/core/regulations.py` | REGULATIONS 정책 엔진 (Rule of Two) | **100%** |
+| `secugent/core/rule_of_two.py` | Rule of Two 축 평가 | **100%** |
 | `secugent/core/mechanical_oversight.py` | 기계적 감독 (Deny-by-default HARD BLOCK) | **99%** |
 | `secugent/core/approval.py` | Plan Review / HITL 승인 경로 | **99%** |
-| `secugent/audit/merkle.py` | 일일 Merkle 루트 (RFC 6962 도메인 분리) | **94%** |
-| `secugent/audit/hash_chain.py` | 감사 해시체인 무결성 | **88%** |
+| `secugent/audit/hash_chain.py` | 감사 해시체인 무결성 (위변조 탐지) | **100%** |
+| `secugent/audit/merkle.py` | 일일 Merkle 루트 (RFC 6962 도메인 분리) | **97%** |
 
 **정직한 공개(over-claim 방지):** 위 수치는 **공개 코어에 동봉된 테스트만**으로 측정한
-값입니다. 정책 엔진 3종(regulations·mechanical_oversight·approval)은 **99–100%**입니다.
-반면 `hash_chain.py`(88%)·`merkle.py`(94%)가 100%가 아닌 이유는, 위변조 탐지·STEER
-회귀 시나리오 테스트의 일부가 **비공개(엔터프라이즈) 스위트에 있어 추출 시 제외**되기
-때문입니다. 따라서 본 문서는 "감사 모듈 95%/100%"나 "결정적 모듈 커버리지 100%"를
-주장하지 **않습니다**.
+값입니다. 결정적 통제 모듈 6종 모두 라인 커버리지 **≥95%**(정책 엔진 4종은
+**99–100%**)이며, 여기에는 감사 해시체인·Merkle 루트의 **위변조 경로(tamper-path)
+회귀 테스트가 공개 코어에 동봉되어** 포함됩니다(`hash_chain.py` 100%, `merkle.py` 97%).
+다만 100%로 측정된 모듈을 제외하면, 일부 모듈(`mechanical_oversight.py`·`approval.py`
+99%, `merkle.py` 97%)에는 미커버 라인이 남아 있으므로, 본 문서는 "결정적 모듈 커버리지
+일괄 100%"를 주장하지 **않습니다** — 측정된 값 그대로만 공개합니다.
 
 ## 2. append-only 해시체인 감사로그 — "지우거나 고치면 즉시 들통난다"
 
@@ -91,8 +93,9 @@ python -m secugent.cli verify --determinism --fixture tests/cli/fixtures/determi
 python -m secugent.cli demo
 
 # 3) 결정적 통제 모듈 커버리지 재측정
-python -m pytest --cov=secugent.core.regulations --cov=secugent.core.mechanical_oversight \
-  --cov=secugent.core.approval --cov=secugent.audit.merkle --cov=secugent.audit.hash_chain \
+python -m pytest --cov=secugent.core.regulations --cov=secugent.core.rule_of_two \
+  --cov=secugent.core.mechanical_oversight --cov=secugent.core.approval \
+  --cov=secugent.audit.hash_chain --cov=secugent.audit.merkle \
   --cov-report=term-missing tests/
 
 # 4) 공개 릴리스 게이트 (fail-closed: 비공개 import·금칙 콘텐츠 차단)

@@ -3,14 +3,17 @@
 Status: living document. Date: 2026-06-07. Audience: security reviewers, auditors,
 integrators evaluating SecuGent as a control plane.
 
-This is the **attacker-centric** companion to the normative
-[`SECURITY_CONTRACT.md`](../../SECURITY_CONTRACT.md). The contract states the
-invariants and fail-closed rules; this document enumerates *who attacks what, how,
-and which control stops them*, organised by STRIDE. Reporting policy and disclosure
-SLA are in [`SECURITY.md`](../../SECURITY.md).
+This is the **attacker-centric** view of the public Core's security baseline. It
+states the invariants and fail-closed rules and enumerates *who attacks what, how,
+and which control stops them*, organised by STRIDE. Together with
+[`SECURITY.md`](../../SECURITY.md) (reporting policy + disclosure SLA) and
+[`docs/security/TRUST_PROOF.md`](TRUST_PROOF.md) (externally reproducible
+determinism + audit-chain proofs), these documents are the authoritative security
+baseline shipped in this repository.
 
-When this document and `SECURITY_CONTRACT.md` disagree, **the contract wins** — file
-a PR to reconcile.
+Threat codes (`T1`–`T8`) and invariant references below are anchored to the
+controls enforced in code (`secugent/core/`, `secugent/audit/`). If this document
+disagrees with the enforcing code, **the code wins** — file a PR to reconcile.
 
 ## 1. What we are protecting (assets)
 

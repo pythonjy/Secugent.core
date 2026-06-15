@@ -42,7 +42,8 @@ secugent verify --chain --tenant <tenant> --store <path-to.db>
 
 - [`examples/quickstart/`](examples/quickstart/) — 최소 에이전트 1회전(정책 로드 + 데모).
 - [`examples/policy_demo/`](examples/policy_demo/) — 한국어 정책 REGULATIONS HARD BLOCK 결정성 시연.
-- [`examples/langchain_demo/`](examples/langchain_demo/) — LangChain 통합(항목4 embed SDK에서 완성, 현재 stub).
+- [`examples/langchain_demo/`](examples/langchain_demo/) — LangChain 통합 embed SDK. `langchain` 설치
+  여부와 무관하게 키 없이 실행되며, 정책 위반 도구 호출을 Mechanical Oversight로 HARD BLOCK 한다.
 
 Docker 한 줄로도 데모가 된다(서버 기본 부팅을 깨지 않음):
 
@@ -144,11 +145,13 @@ command.received → plan.created → plan.awaiting_approval(*) → plan.approve
 
 > **티어 안내**: `secugent/desktop/` 백엔드 구현(Docker·Windows Sandbox)은 deferred(Enterprise-인접)
 > 티어로 **이 공개 저장소에는 포함되지 않는다**([`docs/OPEN_CORE.md`](docs/OPEN_CORE.md)). 공개 Core는
-> config 스키마와 stub 인터페이스만 제공하며, `backend="docker"` 사용 시 `DesktopBackendUnavailableError`
-> 로 fail-closed된다. 아래 설명은 Enterprise 티어에서 제공되는 백엔드의 설계 참고용이다.
+> `VirtualDesktopConfig` 스키마만 제공한다. `StubBackend` 를 포함한 어떤 백엔드 구현도 번들하지 않으며,
+> 데스크톱/compute 스텝이 들어오는데 백엔드가 주입되지 않고 `secugent.desktop` 티어도 설치되어 있지
+> 않으면 `DesktopBackendUnavailableError` 로 **fail-closed** 된다. 아래 설명은 Enterprise 티어에서
+> 제공되는 백엔드의 설계 참고용이다.
 
-`VirtualDesktopStub` 대신 추상 인터페이스(`VirtualDesktopBackend`)가 들어왔다.
-기본은 여전히 `StubBackend` 이며, 운영 배포는 `backend="docker"` 로 전환한다.
+공개 Core에는 추상 인터페이스(`VirtualDesktopBackend`)의 *구현체*가 없다. 운영 배포는 백엔드를 직접
+주입하거나 데스크톱 extra(`secugent.desktop` 티어)를 설치한 뒤 `backend="docker"` 로 전환한다.
 
 ### 설치
 ```bash

@@ -14,9 +14,9 @@ operators rotate credentials, calling :meth:`SecretsManager.swap_backend`
 empties the cache immediately so the very next ``get`` consults the new
 backend (no stale lookups).
 
-Per :data:`SECURITY_CONTRACT.md` §6 the secrets are wrapped in
-:class:`pydantic.SecretStr` so they redact on ``repr()``/``str()`` and stay
-out of structured logs (see ``logger.redact``).
+Per the secrets-disclosure controls in ``docs/security/threat_model.md`` the
+secrets are wrapped in :class:`pydantic.SecretStr` so they redact on
+``repr()``/``str()`` and stay out of structured logs (see ``logger.redact``).
 """
 
 from __future__ import annotations
@@ -58,7 +58,8 @@ class VaultBackendError(RuntimeError):
     transport/permission failure must fail *closed*. If it were collapsed into
     "secret not found", a caller's ``except SecretNotFoundError`` could fall back
     to a permissive default while Vault is merely unreachable — a fail-*open*
-    hole (SECURITY_CONTRACT §6). The type split keeps the two cases distinct.
+    hole (see the disclosure controls in ``docs/security/threat_model.md``). The
+    type split keeps the two cases distinct.
     """
 
 

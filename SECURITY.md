@@ -4,11 +4,12 @@ SecuGent is an enterprise agent **trust & control plane**: a security product wh
 entire value proposition is that it can be trusted to deterministically constrain
 autonomous agents. We therefore treat security reports as first-class work.
 
-This file is the **reporting and disclosure policy**. The normative security
-*invariants* live in [`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md) and the
-attacker-centric analysis lives in
-[`docs/security/threat_model.md`](docs/security/threat_model.md). When this file
-and `SECURITY_CONTRACT.md` disagree on an invariant, the contract wins.
+This file is the **reporting and disclosure policy**. For the public Core, the
+normative security *invariants* live in this file together with
+[`docs/security/threat_model.md`](docs/security/threat_model.md) (attacker-centric
+STRIDE analysis) and [`docs/security/TRUST_PROOF.md`](docs/security/TRUST_PROOF.md)
+(externally reproducible determinism + audit-chain proofs). These three documents
+are the authoritative security baseline shipped in this repository.
 
 ## Reporting a vulnerability
 
@@ -84,7 +85,8 @@ LTS-style backports of Critical fixes are planned).
   audit chain/Merkle (`secugent/audit/`), the deterministic policy engines
   (`secugent/core/mechanical_oversight.py`, `regulations.py`, `rule_of_two.py`,
   `approval.py`), and the deploy packaging (`deploy/`);
-- any defeat of a `SECURITY_CONTRACT.md` invariant or a fail-closed rule;
+- any defeat of a security invariant or fail-closed rule documented in this file
+  or `docs/security/threat_model.md`;
 - supply-chain integrity of the published artifacts (SBOM, container image).
 
 **Out of scope**

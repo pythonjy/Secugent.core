@@ -4,8 +4,8 @@
 These types are the *single source of truth* for the data exchanged between
 HEAD/SUB agents, Mechanical Oversight, RISKANALYZER, the approval service, and
 the durable event store. Validation here is intentionally strict — any module
-producing one of these objects must satisfy fail-closed expectations from
-SECURITY_CONTRACT.md §3.
+producing one of these objects must satisfy the fail-closed expectations
+documented in ``docs/security/threat_model.md`` (Tampering / Elevation rows).
 """
 
 from __future__ import annotations

@@ -34,7 +34,14 @@ non-zero if *any* of them is violated (fail-closed — silence is never success)
   strategy doc (``CLAUDE.md``, ``Review/``, ``docs/specs/``, the Korean strategy
   HTMLs, …) and no real secret (API key / token / password / ``.env``) may
   appear in the public set. Documented placeholders (``change-me-*``) are not
-  secrets.
+  secrets. Beyond file NAMES, the prose of every shipped public document
+  (``.md``/``.txt``/``.rst``/``.yaml`` at the repo root or under
+  ``docs/``/``release/``) is scanned for UNAMBIGUOUS internal tokens
+  (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``Review/``,
+  ``docs/specs/``): a clean path is not enough — a CHANGELOG/runbook body line can
+  still name-drop the private tree (CHG-2). The two boundary-machinery files
+  (``release/public_manifest.yaml``, ``release/PUBLIC_RELEASE_RUNBOOK.md``) that
+  must name the excluded paths are tightly allowlisted.
 
 CRITICAL: every check operates on the *manifest-selected* public set, NOT the
 whole repo. The live repo deliberately still contains CLAUDE.md / Review/ /
@@ -126,6 +133,62 @@ _FORBIDDEN_PATH_PREFIXES: Final[tuple[str, ...]] = (
 # directly against the filename (NOT via fnmatch) so a glob-engine unicode quirk
 # cannot let ``*시장진단*.html`` / ``*로우리스크*.html`` leak (closure risk R12).
 _FORBIDDEN_HANGUL_SUBSTRINGS: Final[tuple[str, ...]] = ("시장진단", "로우리스크", "전략")
+
+# Internal tokens that must never appear in the PROSE of a shipped public text
+# file (CHG-2). Unlike the filename gates above, a manifest that excludes
+# ``Review/`` cannot stop a *body* line of CHANGELOG.md / the runbook from
+# name-dropping the private source tree — that leaks internal structure even
+# though the path itself is clean. Each entry is an UNAMBIGUOUS token that is
+# never legitimate inside the body of a public document:
+#
+# * ``Project_Secugent`` — the private source-repo directory name (no public use);
+# * ``DEPLOY_PROGRESS`` / ``BDP_REFORMED`` — internal process/roadmap artifacts;
+# * ``Review/`` / ``docs/specs/`` — internal-only path prefixes.
+#
+# Checked as DIRECT substrings (mirroring :data:`_FORBIDDEN_HANGUL_SUBSTRINGS`),
+# NOT as globs, so the gate is deterministic and version-independent. We do NOT
+# scan for excluded-tier *module* names (``enterprise``, ``cost`` …): README /
+# OPEN_CORE / RELEASE_NOTES / CONTRIBUTING legitimately describe the open-core
+# boundary, so a module-name scan would be a false-positive factory. Keeping the
+# token list to genuinely-internal markers keeps this gate false-positive-free.
+_FORBIDDEN_PROSE_SUBSTRINGS: Final[tuple[str, ...]] = (
+    "Project_Secugent",
+    "DEPLOY_PROGRESS",
+    "BDP_REFORMED",
+    "Review/",
+    "docs/specs/",
+)
+
+# Public text files that legitimately CONTAIN the forbidden prose tokens because
+# their whole job is to DEFINE / VERIFY the open-core boundary, where naming the
+# excluded paths is unavoidable and correct:
+#
+# * ``release/public_manifest.yaml`` — its ``exclude:`` list literally names
+#   ``Review/**`` / ``docs/specs/**`` / ``DEPLOY_PROGRESS.md`` / ``BDP_REFORMED/**``;
+# * ``release/PUBLIC_RELEASE_RUNBOOK.md`` — the extraction runbook documents the
+#   ``git log -- <path>`` leak-check commands that grep the *extracted* history for
+#   exactly these tokens and assert the output is empty (proving they did NOT leak).
+#
+# This allowlist is deliberately TIGHT: exactly the two boundary-machinery files,
+# matched by exact repo-relative POSIX path. Every other shipped text file is
+# scanned with zero tolerance. A new file is NOT covered unless added here.
+_PROSE_SCAN_ALLOWLIST: Final[frozenset[str]] = frozenset(
+    {
+        "release/public_manifest.yaml",
+        "release/PUBLIC_RELEASE_RUNBOOK.md",
+    }
+)
+
+# Repo-relative top-level directories whose shipped text files carry public-facing
+# prose worth scanning for internal tokens, plus the repo root itself. Scoped this
+# way (docs/release/root) because that is where curated narrative (README,
+# CHANGELOG, OPEN_CORE, runbook, release notes, threat model) lives; source-tree
+# ``.yaml`` fixtures and test data are out of scope for the PROSE gate.
+_PROSE_SCAN_TOP_DIRS: Final[frozenset[str]] = frozenset({"docs", "release"})
+# File extensions a public *document* uses (a subset of _TEXT_SUFFIXES). The prose
+# gate scans only these; code/config text (``.py``, ``.toml``, ``.sh`` …) is not a
+# narrative surface and is covered by the closure/secret gates instead.
+_PROSE_SCAN_SUFFIXES: Final[frozenset[str]] = frozenset({".md", ".txt", ".rst", ".yaml"})
 
 # Secret-bearing filenames (a literal ``.env`` is a secret store; ``.env.example``
 # is a documented template and is allowed).
@@ -790,14 +853,58 @@ def _secret_filename_reason(rel: str) -> str | None:
     return None
 
 
+def _is_prose_scan_target(rel: str) -> bool:
+    """True if ``rel`` is a shipped public *document* the prose gate must scan.
+
+    In scope: ``.md`` / ``.txt`` / ``.rst`` / ``.yaml`` files that live at the repo
+    root or under ``docs/`` / ``release/`` (where curated narrative lives), EXCEPT
+    the tightly-scoped :data:`_PROSE_SCAN_ALLOWLIST` boundary-machinery files. Out
+    of scope: source-tree config/fixtures and code text (covered by the closure /
+    secret gates), which are not a public-facing narrative surface.
+    """
+    if rel in _PROSE_SCAN_ALLOWLIST:
+        return False
+    suffix = PurePosixPath(rel).suffix.lower()
+    if suffix not in _PROSE_SCAN_SUFFIXES:
+        return False
+    parts = PurePosixPath(rel).parts
+    if len(parts) == 1:  # repo-root file (README.md, CHANGELOG.md, …).
+        return True
+    return parts[0] in _PROSE_SCAN_TOP_DIRS
+
+
+def _prose_token_reasons(rel: str, text: str) -> list[str]:
+    """Forbidden-internal-token violations in the body of a shipped document.
+
+    Direct substring scan (mirroring the deterministic
+    :data:`_FORBIDDEN_HANGUL_SUBSTRINGS` filename check — never a glob) of every
+    line for each token in :data:`_FORBIDDEN_PROSE_SUBSTRINGS`. Reports the file +
+    1-based line for each token hit so the leak is locatable. Fail-closed: any hit
+    is a violation (the caller turns a non-empty result into a non-zero exit).
+    """
+    reasons: list[str] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for token in _FORBIDDEN_PROSE_SUBSTRINGS:
+            if token in line:
+                reasons.append(f"internal token {token!r} in shipped prose {rel}:{line_no}")
+    return reasons
+
+
 def scan_forbidden_content(files: list[Path]) -> list[str]:
     """Return forbidden-content violations in the public file set (I5).
 
-    Two independent gates:
+    Three independent gates:
 
     * **internal-strategy file names** — CLAUDE.md, Review/, docs/specs/, the
       Korean strategy HTMLs, etc., by basename/path/Hangul-substring (so a
       manifest glob mistype cannot let them leak).
+    * **internal prose tokens** (CHG-2) — UNAMBIGUOUS internal tokens
+      (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``Review/``,
+      ``docs/specs/``) appearing in the BODY of a shipped public document
+      (``.md``/``.txt``/``.rst``/``.yaml`` at the repo root or under
+      ``docs/``/``release/``). A clean path is not enough — a CHANGELOG/runbook
+      line can still name-drop the private tree. The two boundary-machinery files
+      that legitimately carry these tokens are tightly allowlisted.
     * **secret content** — ``.env``/key files by name, plus credential regexes
       scanned inside every text file. Documented ``change-me-*`` placeholders are
       NOT secrets.
@@ -815,9 +922,10 @@ def scan_forbidden_content(files: list[Path]) -> list[str]:
         secret_name = _secret_filename_reason(rel)
         if secret_name is not None:
             violations.append(secret_name)
-        if rel in _SECRET_SCAN_SELF_EXEMPT:
-            continue
-        if path.suffix.lower() not in _TEXT_SUFFIXES:
+
+        scan_prose = _is_prose_scan_target(rel)
+        scan_secrets = rel not in _SECRET_SCAN_SELF_EXEMPT and (path.suffix.lower() in _TEXT_SUFFIXES)
+        if not (scan_prose or scan_secrets):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -827,8 +935,11 @@ def scan_forbidden_content(files: list[Path]) -> list[str]:
         except UnicodeDecodeError:
             # Binary file mislabelled as text — nothing scannable, not a secret.
             continue
-        for label in _secret_hits_in_text(text):
-            violations.append(f"{rel}: secret-like content ({label})")
+        if scan_prose:
+            violations.extend(_prose_token_reasons(rel, text))
+        if scan_secrets:
+            for label in _secret_hits_in_text(text):
+                violations.append(f"{rel}: secret-like content ({label})")
     return sorted(violations)
 
 

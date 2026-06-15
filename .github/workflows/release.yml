@@ -64,18 +64,19 @@ jobs:
       - name: Type check (mypy)
         run: mypy secugent
 
-      - name: Pytest (unit + enterprise + integration + release + ops)
+      - name: Pytest (full public tree + coverage)
         env:
           ANTHROPIC_API_KEY: ""
+        # Enterprise/integration suites are not part of the open-core public
+        # tree, so they are not collected (no explicit path arg → pyproject
+        # testpaths=["tests"] is used). The 80% floor is the public tree's real,
+        # met coverage ceiling; the monorepo's 85% relied on the now-absent
+        # enterprise/integration suites.
         run: >-
           pytest
-          tests/unit
-          tests/enterprise
-          tests/release
-          tests/ops
           -q
           --cov=secugent
-          --cov-fail-under=85
+          --cov-fail-under=80
 
       # REQUIRED before publish — import-closure + secret + strategy-doc scan.
       # Exit non-zero means at least one invariant (I2/I4/I5) is violated;

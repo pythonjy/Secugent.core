@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# BDP_05 item 2 — public/private release manifest (secugent-core v0.1.0).
+# Public/private release manifest (secugent-core v0.1.0).
 #
 # This file is the SINGLE SOURCE OF TRUTH for what ships in the public OSS repo.
 # `scripts/check_public_release.py` reads it and enforces, fail-closed:
@@ -102,7 +102,7 @@ include:
   # Release notes shipped so runbook §6.3 `gh release create --notes-file
   # release/RELEASE_NOTES_v0.1.0.md` resolves inside the extracted public repo.
   - "release/RELEASE_NOTES_v0.1.0.md"
-  # --- Governance / contribution infrastructure (BDP_05 item 5) ---
+  # --- Governance / contribution infrastructure ---
   # These files are required for an OSS public repo (contributor guide, code of
   # conduct, issue/PR templates). They contain NO internal strategy or secrets.
   # release.yml already ships via ".github/workflows/**" above; the four paths
@@ -179,7 +179,7 @@ exclude:
   - "tests/unit/test_stub_backend.py"
   # MIXED test dirs — exclude only the individual files that import a private
   # tier (the Core tests in the same dir still ship). Enumerated by the AST
-  # closure scan over tests/ (BDP_05 item 2).
+  # closure scan over tests/.
   - "tests/audit/test_kms_providers.py"
   - "tests/audit/test_merkle_root_kms_signed.py"
   - "tests/models/test_cascade_router.py"
@@ -193,13 +193,13 @@ exclude:
   # the public deploy set (only Dockerfile + docker-compose.yml + .env.example
   # do). They read those excluded files unconditionally, so under the extracted
   # repo they would FileNotFoundError. They test Enterprise-only deploy artifacts
-  # and are excluded wholesale (BDP_05 item 2 fixer round 2).
+  # and are excluded wholesale.
   - "tests/deploy/**"
   # Tests that import the private SUB agent (secugent.agents.sub_agent — token-
   # budget enforcement, eager secugent.cost import, NOT shipped). They would
   # ModuleNotFoundError under the extracted repo's `pytest -q` (Invariant I8).
   # The excluded-sibling import-closure check now flags these automatically; they
-  # are enumerated here as the primary deny (BDP_05 item 2 fixer round 2).
+  # are enumerated here as the primary deny.
   - "tests/agents/test_dispatcher_envelope.py"
   - "tests/agents/test_dispatcher_parallel.py"
   - "tests/agents/test_envelope_threading.py"

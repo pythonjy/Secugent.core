@@ -14,7 +14,7 @@ SecuGent uses an open-core model with a hard dependency boundary.
 Core modules must not import Enterprise modules. The allowed dependency direction
 is Enterprise -> Core only.
 
-### Full Module Tier Table (BDP_05 항목 1 — 2026-06-10 확정)
+### Full Module Tier Table
 
 #### PUBLIC_CORE 패키지 (Apache-2.0)
 
@@ -47,26 +47,26 @@ is Enterprise -> Core only.
 | `secugent/compliance/` | ENTERPRISE | 컴플라이언스 보고 레이어. |
 | `secugent/cost/` | ENTERPRISE | 쿼터 강제 레이어 (accounting.py, cache.py). |
 | `secugent/api/` | ENTERPRISE | 콘솔·SSO·OIDC·RBAC·WebSocket API 표면 전체. |
-| `secugent/evolution/` | ENTERPRISE | **D1 결정**: P2 옵셔널. AST clean이나 공개 시 가치/리스크 검토 필요. |
-| `secugent/identity/` | ENTERPRISE | **D1 결정**: P2 옵셔널. `registry.py`가 `secugent.api.rbac` 설계 의존(주석·독스트링 레벨). |
-| `secugent/integrations/` | ENTERPRISE | **D1 결정**: P2 옵셔널 외부 커넥터(Slack 승인 등). |
-| `secugent/desktop/` | ENTERPRISE | **D1 결정**: 데스크톱 자동화 최후수단. §A-1 Non-goal에 준함. |
+| `secugent/evolution/` | ENTERPRISE | 옵셔널 add-on, 향후 릴리스로 유보. |
+| `secugent/identity/` | ENTERPRISE | 옵셔널 add-on, 향후 릴리스로 유보. |
+| `secugent/integrations/` | ENTERPRISE | 옵셔널 외부 커넥터(예: Slack 승인), 향후 릴리스로 유보. |
+| `secugent/desktop/` | ENTERPRISE | 데스크톱 자동화 최후수단 add-on, 향후 릴리스로 유보. |
 | `ui/` | ENTERPRISE | 엔터프라이즈 콘솔 프론트엔드. |
 
 > `secugent/tests/`는 `__init__.py` 없는 빈 디렉터리(Python 패키지 미성립, setuptools
 > 디스커버리 대상 아님). 공개 manifest에서 생략.
 
-#### D1 결정 요약 (deferred-4 → Enterprise)
+#### 유보된 Enterprise 패키지 (이번 공개 릴리스 제외)
 
-BDP_05 플래너 세션(2026-06-10)에서 아래 4개 패키지를 **ENTERPRISE 유지**로 결정했다.
-각 패키지는 AST clean이나, P2 옵셔널리티·리스크·설계 의존을 이유로 이번 공개 릴리스에 포함하지 않는다.
+아래 4개 패키지는 옵셔널 Enterprise add-on으로, 이번 공개 릴리스에는 포함하지 않는다.
+각 패키지의 소스는 AST clean이며, 향후 릴리스에서 별도로 다룬다.
 
-| 패키지 | 이유 |
+| 패키지 | 분류 |
 |--------|------|
-| `secugent.evolution` | P2 옵셔널, 공개 시 자기개선 로직 가치/리스크 검토 필요 |
-| `secugent.identity` | P2 옵셔널, `registry.py`가 `secugent.api.rbac` 주석·설계 의존 |
-| `secugent.integrations` | P2 옵셔널, Slack·외부 커넥터 go-to-market 미확정 |
-| `secugent.desktop` | §A-1 Non-goal 준용(데스크톱 자동화 최후수단, 과투자 방지) |
+| `secugent.evolution` | 옵셔널 add-on, 향후 릴리스로 유보 |
+| `secugent.identity` | 옵셔널 add-on, 향후 릴리스로 유보 |
+| `secugent.integrations` | 옵셔널 외부 커넥터(예: Slack 승인), 향후 릴리스로 유보 |
+| `secugent.desktop` | 데스크톱 자동화 최후수단 add-on, 향후 릴리스로 유보 |
 
 ## CI Gate
 

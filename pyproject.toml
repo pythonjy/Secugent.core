@@ -9,6 +9,31 @@ description = "SecuGent — Human-in-the-loop Enterprise Agent Platform (MVP)"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "SecuGent" }]
+# LIC-1/META-3: every source file carries an SPDX Apache-2.0 header. Declared in
+# table form (`{text = ...}`) so the floor stays setuptools>=68; the bare SPDX
+# string form would require setuptools>=77 (PEP 639), which we deliberately do not
+# bump. No [project.urls]: the public repo does not exist yet (manual blocker).
+license = { text = "Apache-2.0" }
+keywords = [
+    "ai-safety",
+    "agent",
+    "guardrails",
+    "human-in-the-loop",
+    "audit",
+    "compliance",
+    "trust-and-control-plane",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "pydantic>=2.6",
     "fastapi>=0.110",

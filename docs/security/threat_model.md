@@ -77,7 +77,7 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 
 | Threat | Vector | Control | Ref |
 | --- | --- | --- | --- |
-| Deny an action occurred | Claim a decision/approval never happened | Every decision gate writes a §C-2 schema event (actor, gate, input_hash, rationale, rule_of_two_axes, prev_event_id) to an append-only log, 6-month+ retention | contract §10.1, CLAUDE.md §C-2, `T7` |
+| Deny an action occurred | Claim a decision/approval never happened | Every decision gate writes a structured audit-schema event (actor, gate, input_hash, rationale, rule_of_two_axes, prev_event_id) to an append-only log, 6-month+ retention | contract §10.1, `T7` |
 | Backdate / reorder events | Forge an alternate history | Hash chain fixes order; daily Merkle root is signed and pushed to an object-lock store | `audit/hash_chain.py`, `audit/merkle.py` |
 
 ### I — Information disclosure
@@ -109,8 +109,8 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 
 ## 4. Prompt injection (cross-cutting, T2/T3)
 
-Injection is treated as **unfixable at the model layer** (CLAUDE.md §A-0): we do not
-rely on "the LLM resisting it." Instead:
+Injection is treated as **unfixable at the model layer** (a core SecuGent design
+tenet): we do not rely on "the LLM resisting it." Instead:
 
 - system prompt and untrusted data are separated; LLM responses pass a validation
   harness (parse/field/score/confidence checks → HITL or hard block on failure, §2.4/2.8);

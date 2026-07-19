@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C7 — resolve_run_state_store: durable run-state store wiring.
+"""resolve_run_state_store: durable run-state store wiring.
 
-Deterministic/critical module (CLAUDE.md §B-4a): unit + property-based
+Deterministic/critical module (triple-test obligation): unit + property-based
 (hypothesis) + scenario regression + a 100x same-input-same-output determinism
 test. The resolver is a pure routing function: same (cfg, is_dev) -> same store
 *type* + same sqlite path, with no clock/random/env dependency in the decision.
 
 Fail-closed invariant: production (is_dev=False) + memory backend must RAISE,
-never silently fall back to in-memory (SECURITY_CONTRACT: deny-by-default).
+never silently fall back to in-memory (deny-by-default).
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def test_sqlite_in_dev_returns_sqlite_store(tmp_path: Path) -> None:
 
 
 def test_sqlite_in_prod_returns_sqlite_store(tmp_path: Path) -> None:
-    # SQLite is durable -> allowed in production (this is the whole point of G-C7).
+    # SQLite is durable -> allowed in production (this is the whole point of the durable-store wiring).
     cfg = _sqlite_cfg(str(tmp_path / "prod.db"))
     store = resolve_run_state_store(cfg, is_dev=False)
     assert isinstance(store, SQLiteRunStateStore)

@@ -15,6 +15,7 @@ from secugent.io.broker.broker import (
     EgressDeniedError,
     EnvelopeGate,
     EnvelopeSuspendedError,
+    PolicyLike,
     StagingHeldError,
 )
 from secugent.io.broker.connector_transport import (
@@ -31,6 +32,7 @@ from secugent.io.broker.transport import RouterTransport, Transport
 
 __all__ = [
     "EgressBroker",
+    "PolicyLike",
     "EgressRequest",
     "EgressResult",
     "ExecutionProfile",
@@ -47,6 +49,7 @@ __all__ = [
     "StagingHeldError",
     "get_broker",
     "set_broker",
+    "reset_broker",
     # EM-06 credential delegation + on-behalf-of identity
     "CredentialBroker",
     "CredentialError",
@@ -72,3 +75,13 @@ def get_broker() -> EgressBroker:
     if _BROKER is None:
         raise RuntimeError("egress broker not initialized (set_broker not called)")
     return _BROKER
+
+
+def reset_broker() -> None:
+    """Clear the process-wide broker back to its uninstalled state.
+
+    Used by the test harness teardown (``tests/conftest.py``) so a broker
+    installed by one test can never leak into the next as a stale singleton.
+    """
+    global _BROKER
+    _BROKER = None

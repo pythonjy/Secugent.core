@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """RISKANALYZER — LLM-driven probabilistic risk scorer.
 
-Per Flowcharts §7 and master prompt PHASE 2:
+Behavior:
 
 1. Mechanical Oversight must have already passed (hard_block paths never reach
    RISKANALYZER — this is enforced by the SUB agent state machine).

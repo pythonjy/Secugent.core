@@ -105,7 +105,7 @@ def test_unauthorized_signer_fails_closed(tmp_path: Path) -> None:
 
 
 def test_wrong_field_type_fails_closed(tmp_path: Path) -> None:
-    """SG-20260602-04: a bundle whose doc_json is an object (not a string) must
+    """A bundle whose doc_json is an object (not a string) must
     raise PolicyLoadError, not leak an AttributeError from verify_bundle."""
     kms = _kms()
     bundle = sign_bundle(_doc(), kms=kms, key_id=_KEY_ID)

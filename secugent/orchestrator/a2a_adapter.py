@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A2A (Agent-to-Agent) collaboration adapter (P1, §A-3 P1-3).
+"""A2A (Agent-to-Agent) collaboration adapter (P1).
 
 Delegates planning / dispatch to a *remote* A2A agent over HTTP JSON, while
 implementing the orchestrator's existing
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import (
@@ -49,13 +49,20 @@ from secugent.orchestrator.errors import (
     PlannerTransientError,
 )
 from secugent.orchestrator.runner import PlanLike
+from secugent.tools.connectors.transport import guard_url_host
+
+if TYPE_CHECKING:
+    import httpx
 
 __all__ = [
     "A2AAgentConfig",
     "A2ADispatcherAdapter",
     "A2AHttpResponse",
     "A2APlannerAdapter",
+    "A2ASettings",
     "A2ATransport",
+    "HttpxA2ATransport",
+    "build_a2a_transport",
 ]
 
 
@@ -114,7 +121,7 @@ class A2AAgentConfig:
 
 
 # --------------------------------------------------------------------------- #
-# Strict response schemas (system boundary — §B-8)
+# Strict response schemas (system boundary)
 # --------------------------------------------------------------------------- #
 
 
@@ -330,3 +337,94 @@ class A2ADispatcherAdapter:
                 f"a2a dispatch response invalid: {exc.error_count()} error(s)"
             ) from exc
         return parsed.model_dump()
+
+
+# --------------------------------------------------------------------------- #
+# Real httpx transport
+# --------------------------------------------------------------------------- #
+
+
+class A2ASettings(BaseModel):
+    """Operator config for the production A2A transport (boot-time).
+
+    ``allow_internal`` is False by default (deny-by-default); set True only
+    for a closed-network on-prem peer A2A agent whose endpoint is RFC-1918.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_internal: bool = False
+
+
+class HttpxA2ATransport:
+    """Real :class:`A2ATransport` — one httpx request → :class:`A2AHttpResponse`.
+
+    The adapter owns retry + schema validation; this transport only moves bytes:
+    it returns the status + parsed JSON body (or the raw text when the body is not
+    JSON, so the adapter rejects it as a permanent/malformed failure rather than a
+    silent success), and *raises* on timeout / network so the adapter classifies it
+    as transient. The SSRF guard (INV-6) runs first; the credential rides only in
+    the caller-supplied ``Authorization`` header (INV-5). ``httpx`` is imported
+    lazily (INV-8); an injected ``_mock_transport`` lets tests avoid sockets.
+    """
+
+    def __init__(
+        self,
+        *,
+        allow_internal: bool = False,
+        _mock_transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._allow_internal = allow_internal
+        self._mock_transport = _mock_transport
+
+    async def __call__(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        json_body: dict[str, Any],
+        timeout_sec: float,
+    ) -> A2AHttpResponse:
+        # SsrfBlocked propagates as-is: the adapter's _request treats any non-
+        # transient/permanent raise as transient, so a blocked endpoint fails the
+        # attempt (and is retried/exhausted into a terminal failure) — never a
+        # silent success.
+        guard_url_host(url, allow_internal=self._allow_internal)
+
+        httpx = _import_httpx()
+        client_kwargs: dict[str, Any] = {"timeout": timeout_sec}
+        if self._mock_transport is not None:
+            client_kwargs["transport"] = self._mock_transport
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            # No try/except here: a timeout / network error must propagate so the
+            # adapter's `_request` classifies it as transient (its documented
+            # contract). We only translate the BODY shape.
+            response = await client.request(method, url, json=json_body, headers=headers)
+        try:
+            body: Any = response.json()
+        except ValueError:
+            # Non-JSON 2xx/4xx body → surface the raw text (a non-dict) so the
+            # adapter's strict schema validation rejects it as permanent/malformed.
+            body = response.text
+        return A2AHttpResponse(status=response.status_code, body=body)
+
+
+def _import_httpx() -> Any:
+    """Lazy ``httpx`` import (INV-8: never eager at module import)."""
+    try:
+        import httpx
+    except ImportError as exc:  # pragma: no cover - environment-specific
+        raise DispatcherResultMalformed(
+            "httpx is required for the production A2A transport; install it or inject a transport"
+        ) from exc
+    return httpx
+
+
+def build_a2a_transport(settings: A2ASettings) -> HttpxA2ATransport:
+    """Materialise the production A2A transport.
+
+    The integration step injects the result into :class:`A2APlannerAdapter` /
+    :class:`A2ADispatcherAdapter`; this module never reaches ``api/main.py`` itself.
+    """
+    return HttpxA2ATransport(allow_internal=settings.allow_internal)

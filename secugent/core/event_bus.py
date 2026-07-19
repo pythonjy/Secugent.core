@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """In-process pub/sub Event Bus with WebSocket broadcast support.
 
-Per SECURITY_CONTRACT §5, the bus is a *display + input channel* only — the
+The bus is a *display + input channel* only — the
 durable source of truth is :class:`secugent.core.event_store.EventStore`.
 Callers are expected to:
 

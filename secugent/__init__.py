@@ -6,7 +6,7 @@ stay side-effect-free and must never require any Enterprise extra: the Core
 (policy engine, Rule of Two, hash-chain audit) boots standalone. Enterprise
 features (console, multitenant admin, compliance reports, external KMS, SSO)
 are gated behind the ``enterprise`` extra and the lazy guard below — see
-``docs/OPEN_CORE.md`` for the tier mapping and license boundary (BDP_01 item 1).
+``docs/OPEN_CORE.md`` for the tier mapping and license boundary.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def require_enterprise(*, feature: str, module: str, extra: str = "enterprise") 
 
     This is intentionally a *runtime* check — it imports nothing at package
     import time, so ``import secugent`` stays side-effect-free and works on a
-    Core-only install (BDP_01 invariant I1).
+    Core-only install (standalone open-core invariant I1).
 
     Args:
         feature: Human-readable feature name, surfaced in the error (e.g.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260603-04 — RegulationsLoader.for_run canary diagnostic clarity.
+"""RegulationsLoader.for_run canary diagnostic clarity.
 
 When a caller activates the canary path (``canary_share > 0``) but forgets to pass
 ``canary_payload``, the loader previously fell through to ``for_tenant`` and silently

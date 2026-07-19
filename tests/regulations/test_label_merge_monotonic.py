@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-M3 — strengthen-only ``data_labels`` merge (deterministic, §B-4a).
+"""Strengthen-only ``data_labels`` merge (deterministic, §B-4a).
 
 Triple harness part 1/2: unit (all branches) + scenario regression + 100×
 determinism. Property-based invariants live in
@@ -49,7 +49,7 @@ def _label(
         hard_block=hard_block,
         allowed_actions=allowed_actions or [],
         # Distinguish "not provided" (default scope) from an explicit empty list
-        # so path_patterns edge cases (SG-20260606-01) are expressible.
+        # so path_patterns edge cases are expressible.
         path_patterns=["*/x/*"] if path_patterns is None else path_patterns,
     )
 
@@ -151,7 +151,7 @@ def test_allowed_actions_nonempty_base_to_empty_allowed() -> None:
 # --------------------------------------------------------------------------- #
 # path_patterns axis (removing a pattern = narrowing protected scope → rejected)
 #
-# SG-20260606-01: ``mechanical_oversight._match_data_label`` raises a violation
+# ``mechanical_oversight._match_data_label`` raises a violation
 # only when one of ``label.path_patterns`` matches the normalised path. More
 # patterns ⇒ MORE paths matched ⇒ MORE protection. Dropping a pattern is a
 # silent deny-by-default relaxation, so the override's path_patterns must be a
@@ -296,7 +296,7 @@ def test_korean_efs_path_pattern_drop_only_rejected() -> None:
     """전자금융감독규정: 다른 모든 축(severity/hard_block/allowed_actions)을 동일하게
     유지한 채 path_patterns에서 보호 경로 하나만 제거하는 테넌트 override → 거부.
 
-    SG-20260606-01의 핵심 회귀: 3축이 동일하면 가드를 통과하던 무검출 완화."""
+    핵심 회귀: 3축이 동일하면 가드를 통과하던 무검출 완화."""
     base = [
         _label(
             "efs-customer-financial",
@@ -394,7 +394,7 @@ def test_loader_merge_routes_through_data_labels_guard() -> None:
 # --------------------------------------------------------------------------- #
 # end-to-end through the real OversightEngine — BLOCK must stay BLOCK
 #
-# SG-20260606-01: the reviewer proved that dropping a path_patterns entry flips
+# The reviewer proved that dropping a path_patterns entry flips
 # /srv/internal-only/secret.txt from allowed=False(hard_block) → allowed=True.
 # With the superset guard the merge now raises, so the BLOCK→ALLOW hole closes.
 # --------------------------------------------------------------------------- #

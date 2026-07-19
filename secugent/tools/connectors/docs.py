@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — document-management connector (사내 문서함·전자결재 문서).
+"""Document-management connector (사내 문서함·전자결재 문서).
 
 Same shape as :mod:`secugent.tools.connectors.notion`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a
@@ -72,7 +72,7 @@ class DocsConnector(_RateLimitedConnector):
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("docs connector requires OAuth token via SecretsManager")
-        if http_transport is None:
-            return ConnectorResult(ok=True, payload={"mock": True, "action": action.name})
-        response = await http_transport(action=action, principal=principal, secret_value=secret_value)
+        # per-call transport > bound transport > fail closed (no mock success).
+        transport = self._resolve_transport(http_transport)
+        response = await transport(action=action, principal=principal, secret_value=secret_value)
         return ConnectorResult(ok=bool(response.get("ok", True)), payload=response)

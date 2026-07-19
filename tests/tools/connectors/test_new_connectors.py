@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — groupware / SAP / docs connectors (deterministic, §B-4a-ish).
+"""Groupware / SAP / docs connectors (§14d; deterministic, §B-4a-ish).
 
 These three connectors follow the EXISTING slack/notion/jira pattern (a duck-typed
 :class:`~secugent.tools.connectors.base.Connector`: ``name`` + ``actions`` +
@@ -118,6 +118,15 @@ def _register(reg: ConnectorRegistry, connector: Any, policy: ConnectorPolicy, s
     reg.register(ConnectorBinding(connector=connector, policy=policy, secret_name=secret))
 
 
+async def _echo_http(*, action: ConnectorAction, principal: Principal, secret_value: str) -> dict[str, Any]:
+    """S5: a connector now fails closed without a transport, so the allow-path
+    tests must inject one. This echo stand-in proves the gate let the action
+    through to a REAL transport call (not the removed mock-success fallback);
+    it asserts the credential reached the seam without leaking it elsewhere."""
+    assert secret_value, "credential must reach the transport seam"
+    return {"ok": True, "vendor_action": action.name}
+
+
 # --------------------------------------------------------------------------- #
 # Per-connector allow / deny fixtures
 # --------------------------------------------------------------------------- #
@@ -171,7 +180,8 @@ async def test_groupware_allowed_action_passes_gate_and_audited() -> None:
     transport = _transport(reg, audit)
 
     result = await transport.dispatch(
-        _request("groupware.post_message", meta=(("channel", _GW_CHANNEL), ("text", "공지")))
+        _request("groupware.post_message", meta=(("channel", _GW_CHANNEL), ("text", "공지"))),
+        http_transport=_echo_http,
     )
     assert result.ok is True
     dispatched = [e for e in audit.events if e.type == "connector.dispatched"]
@@ -189,7 +199,8 @@ async def test_docs_allowed_action_passes_gate_and_audited() -> None:
         _request(
             "docs.create_document",
             meta=(("workspace_id", "ws-corp"), ("folder_id", _DOC_FOLDER), ("title", "결재")),
-        )
+        ),
+        http_transport=_echo_http,
     )
     assert result.ok is True
     assert any(e.type == "connector.dispatched" for e in audit.events)
@@ -205,7 +216,8 @@ async def test_sap_allowed_action_passes_gate_and_audited() -> None:
         _request(
             "sap.post_document",
             meta=(("company_code", _SAP_COMPANY), ("transaction_code", _SAP_TXN)),
-        )
+        ),
+        http_transport=_echo_http,
     )
     assert result.ok is True
     assert any(e.type == "connector.dispatched" for e in audit.events)
@@ -361,10 +373,14 @@ async def test_groupware_rate_limit_fails_closed() -> None:
     policy = ConnectorPolicy(allowed_channels=[_GW_CHANNEL], rate_limit_per_sec=1)
     action = ConnectorAction(name="post_message", params={"channel": _GW_CHANNEL})
     principal = _principal()
-    first = await connector.execute(action, principal=principal, policy=policy, secret_value="t")
+    first = await connector.execute(
+        action, principal=principal, policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert first.ok is True
     with pytest.raises(RateLimitExceeded):
-        await connector.execute(action, principal=principal, policy=policy, secret_value="t")
+        await connector.execute(
+            action, principal=principal, policy=policy, http_transport=_echo_http, secret_value="t"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -380,7 +396,9 @@ async def test_validate_action_is_idempotent_no_rate_consumption() -> None:
     for _ in range(10):
         await connector.validate_action(action, policy)
     # the single execute still succeeds (no token was consumed by validate)
-    result = await connector.execute(action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
 
 
@@ -394,7 +412,9 @@ async def test_groupware_list_channels_read_action_executes() -> None:
     policy = ConnectorPolicy(allowed_channels=[_GW_CHANNEL])
     action = ConnectorAction(name="list_channels", params={})
     await connector.validate_action(action, policy)  # read action: no target gate
-    result = await connector.execute(action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
 
 
@@ -503,7 +523,9 @@ async def test_docs_search_is_workspace_scoped_no_folder_gate() -> None:
     connector = DocsConnector()
     policy = ConnectorPolicy(allowed_workspace_ids=["ws-corp"])  # no folder allowlist
     action = ConnectorAction(name="search", params={"workspace_id": "ws-corp", "query": "결재"})
-    result = await connector.execute(action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
 
 
@@ -515,7 +537,9 @@ async def test_docs_update_document_uses_document_id_for_folder_gate() -> None:
     action = ConnectorAction(
         name="update_document", params={"workspace_id": "ws-corp", "document_id": _DOC_FOLDER}
     )
-    result = await connector.execute(action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
 
 
@@ -540,7 +564,9 @@ async def test_sap_read_document_company_gate_only() -> None:
     connector = SapConnector()
     policy = ConnectorPolicy(allowed_projects=[_SAP_COMPANY])  # no transaction allowlist needed
     action = ConnectorAction(name="read_document", params={"company_code": _SAP_COMPANY})
-    result = await connector.execute(action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
 
 
@@ -579,6 +605,7 @@ async def test_sap_search_requires_whitelisted_company_code() -> None:
         ConnectorAction(name="search", params={"company_code": _SAP_COMPANY, "query": "전표"}),
         principal=_principal(),
         policy=policy,
+        http_transport=_echo_http,
         secret_value="t",
     )
     assert result.ok is True
@@ -628,7 +655,9 @@ async def test_groupware_read_thread_channel_gated() -> None:
     connector = GroupwareConnector()
     policy = ConnectorPolicy(allowed_channels=[_GW_CHANNEL])
     ok_action = ConnectorAction(name="read_thread", params={"channel": _GW_CHANNEL})
-    result = await connector.execute(ok_action, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        ok_action, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
     bad_action = ConnectorAction(name="read_thread", params={"channel": _GW_CHANNEL_DENIED})
     with pytest.raises(WhitelistViolation):
@@ -680,7 +709,9 @@ async def test_groupware_delete_message_is_channel_gated() -> None:
     assert "delete_message" in connector.actions
     policy = ConnectorPolicy(allowed_channels=[_GW_CHANNEL])
     ok = ConnectorAction(name="delete_message", params={"channel": _GW_CHANNEL, "ts": "1"})
-    result = await connector.execute(ok, principal=_principal(), policy=policy, secret_value="t")
+    result = await connector.execute(
+        ok, principal=_principal(), policy=policy, http_transport=_echo_http, secret_value="t"
+    )
     assert result.ok is True
     bad = ConnectorAction(name="delete_message", params={"channel": _GW_CHANNEL_DENIED, "ts": "1"})
     with pytest.raises(WhitelistViolation):

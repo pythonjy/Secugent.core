@@ -65,7 +65,7 @@ class AgentConfig(BaseModel):
         if not any(n.kind == "head" for n in self.nodes):
             raise ValueError("agent config must contain at least one HEAD")
 
-        # SG-20260602-06: existence is not enough — a config where every node is
+        # existence is not enough — a config where every node is
         # disabled (e.g. an operator/attacker flips all `enabled` to False) would
         # pass the existence check yet leave the planner with no routable HEAD or
         # SUB at /command enqueue time. Require at least one *enabled* HEAD and

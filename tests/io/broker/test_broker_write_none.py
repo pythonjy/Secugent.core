@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260603-03 — broker.dispatch refuses write-class effects with no content.
+"""Broker.dispatch refuses write-class effects with no content.
 
 A write-class effect (FILE_WRITE / NET_SEND / CONNECTOR_ACTION) submitted with no
 explicit ``content`` AND no ``step.context["content"]`` previously fell through to

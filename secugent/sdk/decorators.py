@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """``@require_oversight`` — wrap any callable so its action passes SecuGent oversight.
 
-BDP_02 item 4 (§4.5). Decorating a sync OR async callable makes every invocation,
+Decorating a sync OR async callable makes every invocation,
 *before* the wrapped body runs:
 
 1. build the :class:`~secugent.core.contracts.Step` this call represents,
 2. run it through the single :class:`~secugent.sdk.gate.OversightGate` (REGULATIONS
-   deny-by-default → Rule-of-Two forced HITL → §C-2 audit), and
+   deny-by-default → Rule-of-Two forced HITL → audit emit), and
 3. only then call the wrapped function, re-raising its own exceptions unchanged.
 
 A REGULATIONS violation raises :class:`~secugent.core.contracts.HardBlockException`;
 a HITL denial raises :class:`~secugent.sdk.gate.OversightBlocked`. Both are
-fail-closed — the wrapped body never runs. Neither is swallowed (§B-8).
+fail-closed — the wrapped body never runs. Neither is swallowed.
 
-**Nested-wrap double-evaluation guard (§4.7):** when a wrapped callable calls
+**Nested-wrap double-evaluation guard:** when a wrapped callable calls
 another wrapped callable on the *same* gate inside the same call stack, only the
 outermost wrap evaluates the gate. A :class:`contextvars.ContextVar` sentinel
 keyed by ``id(gate)`` marks "this gate is already enforcing on this stack"; the
@@ -54,7 +54,7 @@ _ASGI_SCOPE_TYPES: frozenset[str] = frozenset({"http", "websocket"})
 
 # Action types whose REGULATIONS rules are resource-anchored (path/domain matchers).
 # For these, an ASGI scope that yields NO derivable resource must fail closed rather
-# than silently skip the rule (deny-by-default, §A-2.2).
+# than silently skip the rule (deny-by-default).
 _RESOURCE_ANCHORED_ACTIONS: frozenset[str] = frozenset({"file_read", "file_write", "desktop", "http_get"})
 
 
@@ -232,7 +232,7 @@ def require_oversight(
                         )
                     # The sentinel stays set for the duration of the wrapped body
                     # so a nested call to another callable wrapped on the SAME gate
-                    # is deduplicated (single evaluation, §4.7).
+                    # is deduplicated (single evaluation).
                     # cast: the wrapped coroutine fn returns Awaitable[Any] — mypy
                     # cannot infer that from the bound TypeVar F here.
                     return await cast(Callable[..., Awaitable[Any]], func)(*args, **kwargs)

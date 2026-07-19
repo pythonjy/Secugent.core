@@ -20,6 +20,11 @@ class EgressRequest:
 
     ``effect`` is already EM-01-normalized; ``content`` carries write-payload bytes
     for write effects (None otherwise).
+
+    ``label_uncertain`` is True when ``label`` is a fail-safe floor from a
+    ``LabelStore`` failure (its real classification could not be determined). The
+    broker then denies EXTERNAL egress regardless of the ``max_external`` ceiling
+    (F3, INV-D). False on the normal path (label is a real classification).
     """
 
     effect: Effect
@@ -28,6 +33,7 @@ class EgressRequest:
     run_id: str
     profile: ExecutionProfile
     content: bytes | None = None
+    label_uncertain: bool = False
 
 
 @dataclass(frozen=True)

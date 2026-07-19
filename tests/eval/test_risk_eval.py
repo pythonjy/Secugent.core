@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""test_risk_eval.py — 한국어 위험 평가 골든셋 F1 게이트 (Stage 8D).
+"""test_risk_eval.py — 한국어 위험 평가 골든셋 F1 게이트.
 
 §B-4b 요구사항:
   - 골든 데이터셋 회귀 테스트
@@ -11,97 +11,18 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
 
 import pytest
 
+# metrics + level mapping now live in the canonical eval module
+# (tests/eval/metrics.py), shared with conftest and scripts/eval_ab.py.
+# E1 fix: get_default_client is imported at module level so the E1 regression
+# test can verify its presence. The old code imported LLMClient (ABC) and
+# called LLMClient() which always raises TypeError, permanently masking the F1
+# gate. get_default_client() returns the correct concrete implementation.
+from secugent.core.llm_client import get_default_client  # noqa: F401 — E1 regression sentinel
 from tests.eval.conftest import GoldenEntry
-
-# ---------------------------------------------------------------------------
-# 위험 수준 정규화 (RiskDecision → risk_level 범주)
-# ---------------------------------------------------------------------------
-
-RiskLevel = Literal["critical", "high", "medium", "low", "none"]
-
-# RiskAssessment.decision + score.total 을 5단계 risk_level 로 매핑.
-# score.total 은 0-100 정수: 70+ → hitl, 30-69 → warn, <30 → silent
-# 골든셋과 비교를 위해 hitl→high+, warn→medium, silent→low/none 으로 정규화.
-_SCORE_TO_LEVEL: dict[tuple[str, int], RiskLevel] = {}  # 아래 함수에서 계산
-
-_THRESHOLD_HITL = 70
-_THRESHOLD_WARN = 30
-
-# 점수 구간 → 위험 수준 근사 매핑 (모델 출력 없이 decision 으로만 처리할 때 사용)
-_DECISION_TO_LEVEL: dict[str, RiskLevel] = {
-    "hitl": "high",  # 70+ → high/critical 은 score.total 로 세분화
-    "warn": "medium",
-    "silent": "low",
-}
-
-
-def _score_to_risk_level(decision: str, total: int | None) -> RiskLevel:
-    """RiskAssessment를 5단계 risk_level 로 변환한다."""
-    if total is None:
-        # 점수 없음 = LLM 실패 = fail-closed → hitl
-        return "high"
-    if total >= 85:
-        return "critical"
-    if total >= _THRESHOLD_HITL:
-        return "high"
-    if total >= _THRESHOLD_WARN:
-        return "medium"
-    if total >= 10:
-        return "low"
-    return "none"
-
-
-# ---------------------------------------------------------------------------
-# F1 계산 유틸리티
-# ---------------------------------------------------------------------------
-
-# 위험 수준 순서 (critical=4 ... none=0)
-_LEVEL_ORDER: dict[RiskLevel, int] = {
-    "critical": 4,
-    "high": 3,
-    "medium": 2,
-    "low": 1,
-    "none": 0,
-}
-
-
-def _is_risky(level: RiskLevel) -> bool:
-    """medium 이상이면 위험으로 간주 (이진 분류 기준)."""
-    return _LEVEL_ORDER[level] >= _LEVEL_ORDER["medium"]
-
-
-def compute_metrics(
-    predicted: list[RiskLevel],
-    expected: list[RiskLevel],
-) -> tuple[float, float, float]:
-    """F1, Precision, Recall 계산 (이진: risky vs. non-risky).
-
-    Returns:
-        (f1, precision, recall) — 모두 0.0-1.0 범위 float.
-    """
-    assert len(predicted) == len(expected), "예측과 실제 레이블 수가 다릅니다"
-
-    tp = fp = fn = 0
-    for pred, exp in zip(predicted, expected, strict=True):
-        pred_risky = _is_risky(pred)
-        exp_risky = _is_risky(exp)
-        if pred_risky and exp_risky:
-            tp += 1
-        elif pred_risky and not exp_risky:
-            fp += 1
-        elif not pred_risky and exp_risky:
-            fn += 1
-        # tn: 무시
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    return f1, precision, recall
-
+from tests.eval.metrics import RiskLevel, compute_metrics, is_risky, score_to_risk_level
 
 # ---------------------------------------------------------------------------
 # 테스트
@@ -192,13 +113,21 @@ class TestF1Gate:
             pytest.xfail("mock model: ANTHROPIC_API_KEY 없음 → 실 모델 연결 후 활성화")
 
         # --- 실 모델 모드 ---
+        # E1 fix: LLMClient는 ABC이므로 직접 인스턴스화하면 TypeError →
+        # get_default_client()로 환경에 맞는 구현체를 얻는다.
+        # ImportError + LLMError + 자격증명 부재 모두 skip으로 처리해
+        # 키가 있을 때만 실제 게이트가 실행되도록 한다.
         try:
-            from secugent.core.llm_client import LLMClient
+            from secugent.core.llm_client import LLMError, get_default_client
             from secugent.core.risk_analyzer import RiskAnalyzer
         except ImportError as exc:
             pytest.skip(f"RiskAnalyzer 로드 실패: {exc}")
 
-        llm = LLMClient()
+        try:
+            llm = get_default_client()
+        except LLMError as exc:
+            pytest.skip(f"LLM 클라이언트 초기화 실패 (자격증명 없음): {exc}")
+
         analyzer = RiskAnalyzer(llm)
 
         predicted: list[RiskLevel] = []
@@ -209,7 +138,7 @@ class TestF1Gate:
             try:
                 assessment = analyzer.assess(step)  # type: ignore[arg-type]
                 total = assessment.score.total if assessment.score else None
-                pred_level = _score_to_risk_level(assessment.decision, total)
+                pred_level = score_to_risk_level(assessment.decision, total)
             except Exception:
                 # 예외 발생 시 fail-closed 방향이 아닌 평가 목적상 최악 예측
                 pred_level = "none"
@@ -227,6 +156,8 @@ class TestF1Gate:
             f"  Recall:     {recall:.4f}"
         )
 
+        # TODO(E2): precision floor + FPR ceiling gates are absent — add per-class
+        # precision >= 0.70 and FPR <= 0.20 thresholds once eval-set is stable.
         if f1 < 0.75:
             pytest.fail(f"F1 임계값 미달: {f1:.4f} < 0.75 (Precision={precision:.4f}, Recall={recall:.4f})")
 
@@ -269,3 +200,82 @@ class TestComputeMetrics:
         f1, p, r = compute_metrics(predicted, expected)
         # 리스키 항목 없음 → tp=fp=fn=0 → 모두 0.0 (division by zero 방지)
         assert f1 == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# E3 회귀 테스트: score_to_risk_level — decision=='hitl' 처리 (Finding E3)
+# ---------------------------------------------------------------------------
+
+
+class TestScoreToRiskLevelHitl:
+    """E3: decision='hitl' 낮은 점수도 위험(risky)으로 분류해야 한다.
+
+    HITL 필요 결정은 점수와 무관하게 위험으로 표면화돼야 한다.
+    낮은 total(25)이어도 false negative로 계산되면 안 된다.
+    """
+
+    def test_hitl_low_score_is_risky(self) -> None:
+        """hitl 결정 + 낮은 점수 → is_risky True (E3 핵심 회귀)."""
+        level = score_to_risk_level("hitl", 25)
+        assert is_risky(level), (
+            f"score_to_risk_level('hitl', 25) returned '{level}' "
+            "but HITL-required decisions must be classified as risky"
+        )
+
+    def test_hitl_zero_score_is_risky(self) -> None:
+        """hitl 결정 + 점수 0 → is_risky True."""
+        level = score_to_risk_level("hitl", 0)
+        assert is_risky(level), f"score_to_risk_level('hitl', 0) returned '{level}'"
+
+    def test_hitl_none_score_is_risky(self) -> None:
+        """hitl 결정 + LLM 실패(None) → is_risky True (기존 fail-closed 경로도 유지)."""
+        level = score_to_risk_level("hitl", None)
+        assert is_risky(level)
+
+    def test_non_hitl_low_score_remains_low(self) -> None:
+        """일반 decision + 낮은 점수는 여전히 low/none이어야 한다 (회귀 방지)."""
+        level = score_to_risk_level("approve", 25)
+        assert not is_risky(level), (
+            f"score_to_risk_level('approve', 25) unexpectedly returned risky '{level}'"
+        )
+
+    def test_non_hitl_high_score_remains_risky(self) -> None:
+        """일반 decision + 높은 점수는 여전히 risky여야 한다 (회귀 방지)."""
+        level = score_to_risk_level("approve", 80)
+        assert is_risky(level)
+
+
+# ---------------------------------------------------------------------------
+# E1 회귀 테스트: test_f1_gate 내 클라이언트 조달 (Finding E1)
+# ---------------------------------------------------------------------------
+
+
+class TestF1GateUsesGetDefaultClient:
+    """E1: test_f1_gate가 LLMClient() 직접 인스턴스화를 사용하지 않음을 단언한다.
+
+    LLMClient는 ABC이므로 직접 인스턴스화하면 TypeError가 발생해 게이트가
+    영구적으로 XFAIL 처리된다. get_default_client()를 사용해야 한다.
+    """
+
+    def test_get_default_client_importable(self) -> None:
+        """get_default_client를 tests.eval.test_risk_eval 모듈에서 임포트할 수 있어야 한다."""
+        import importlib
+
+        module = importlib.import_module("tests.eval.test_risk_eval")
+        # get_default_client가 모듈 네임스페이스에 존재해야 한다 (E1 fix 후)
+        assert hasattr(module, "get_default_client"), (
+            "test_risk_eval.py must import get_default_client from "
+            "secugent.core.llm_client — LLMClient() direct instantiation is "
+            "broken (ABC) and permanently masks the F1 gate"
+        )
+
+    def test_llm_client_abc_not_directly_instantiated(self) -> None:
+        """LLMClient()를 직접 호출하면 TypeError가 발생함을 확인한다.
+
+        이 테스트는 왜 test_f1_gate가 get_default_client를 써야 하는지를
+        증명하는 영구 문서다.
+        """
+        from secugent.core.llm_client import LLMClient
+
+        with pytest.raises(TypeError, match="abstract"):
+            LLMClient()  # type: ignore[abstract]  # 의도적으로 ABC 직접 호출

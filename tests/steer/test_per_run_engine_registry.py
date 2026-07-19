@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-H4 STEER non-regression — patches reach the CORRECT run's engine.
+"""STEER non-regression — patches reach the CORRECT run's engine.
 
 With per-run :class:`OversightEngine` instances (one per dispatch), a STEER
 ``add_constraint`` directive for run A must patch run A's engine and leave run B's

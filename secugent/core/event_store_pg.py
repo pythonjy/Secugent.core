@@ -28,7 +28,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import ValidationError
 
@@ -43,11 +43,13 @@ from secugent.audit.hash_chain import (
 from secugent.core.contracts import Approval, ApprovalScope, Event, Run
 from secugent.core.event_store import EventStoreError
 from secugent.core.event_store_base import (
+    LeaderLease,
+    LeaderLostError,
     LeaseLostError,
     RunLease,
 )
 from secugent.core.logger import redact
-from secugent.core.tenancy import TenantId
+from secugent.core.tenancy import TenantId, current_tenant
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
@@ -56,8 +58,23 @@ __all__ = [
     "PgChainedEventStore",
     "PgEventStore",
     "PgEventStoreError",
+    "WriterGuard",
     "is_pg_available",
 ]
+
+
+class WriterGuard(Protocol):
+    """Structural single-writer gate (INV-C1-4).
+
+    Declared structurally so this module never imports
+    :class:`secugent.deploy.airgap.HaWriterArbiter` (framework/model-neutral core;
+    also avoids a deploy→core import cycle). ``assert_writer`` is the
+    pure, NON-mutating ownership check: a non-leader raises ``LeaderLostError``
+    (``secugent.core.event_store_base``), blocking the write — deny-by-default.
+    """
+
+    async def assert_writer(self, worker_id: str) -> None: ...
+
 
 _logger = logging.getLogger("secugent.core.event_store_pg")
 
@@ -74,6 +91,37 @@ def is_pg_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+def _decide_leader_acquisition(
+    *,
+    existing: tuple[str, datetime, int] | None,
+    now: datetime,
+    worker_id: str,
+) -> tuple[bool, int]:
+    """Pure single-writer election decision (no I/O, property-testable).
+
+    ``existing`` is the current ``(holder_worker_id, expires_at, fence_token)`` row
+    for the lock (or ``None`` when unheld). Returns ``(granted, new_fence_token)``:
+
+    * no row ⇒ grant, fence ``1``.
+    * row EXPIRED (``expires_at <= now``) ⇒ grant takeover, ``fence + 1``.
+    * row held by the SAME worker ⇒ grant refresh, ``fence + 1``.
+    * row held by ANOTHER worker and still LIVE ⇒ **reject** (deny-by-default;
+      two workers can never both hold a live lease — the mutual-exclusion
+      invariant the property test pins).
+
+    The monotonic ``fence + 1`` lets a renew reject a write authorised under an
+    older leadership epoch (stale-leader fencing).
+    """
+    if existing is None:
+        return True, 1
+    _holder, expires_at, fence = existing
+    if expires_at <= now:
+        return True, fence + 1
+    if _holder == worker_id:
+        return True, fence + 1
+    return False, fence
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +176,14 @@ CREATE TABLE IF NOT EXISTS run_leases (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS leader_leases (
+    lock_key BIGINT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    acquired_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    fence_token BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS event_chain (
     event_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -158,8 +214,8 @@ CREATE INDEX IF NOT EXISTS idx_events_archive_tenant_ts ON events_archive(tenant
 # ENABLE alone does NOT apply policies to the table OWNER — and SecuGent commonly
 # connects as the owner — so without FORCE the ``current_setting('app.tenant_id')``
 # predicate is silently ignored for owner connections and queries would see ALL
-# tenants' rows. FORCE closes that owner-bypass (G-C6 Stage-5 hardening). FORCE
-# needs no explicit downgrade: dropping the policy/table reverses it.
+# tenants' rows. FORCE closes that owner-bypass (RLS hardening). FORCE needs no
+# explicit downgrade: dropping the policy/table reverses it.
 _RLS_POLICY = """
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events FORCE ROW LEVEL SECURITY;
@@ -216,13 +272,53 @@ class PgEventStore:
             raise PgEventStoreError("asyncpg or sqlalchemy not installed — see `pip install 'secugent[pg]'`")
         self._dsn = dsn
         self._engine = create_async_engine(dsn, pool_pre_ping=True)
+        # Single-writer gate (INV-C1-4). ``None`` ⇒ no HA fencing (dev /
+        # single-node / every existing test): the write path is unchanged. When a
+        # guard + worker id are wired (``set_writer_guard``, prod PG HA), every
+        # durable write asserts leadership first and a non-leader fails closed.
+        self._writer_guard: WriterGuard | None = None
+        self._worker_id: str | None = None
+        # The active DURABLE leader lease (None ⇒ no durable fence wired —
+        # every existing test / dev / single-node: the write path is unchanged).
+        # When armed (``set_leader_lease`` after ``acquire_leader_lease``), every
+        # durable write re-asserts this worker still holds a live lease.
+        self._leader_lease: LeaderLease | None = None
 
     @property
     def engine(self) -> Any:
         return self._engine
 
+    def set_writer_guard(self, guard: WriterGuard, worker_id: str) -> None:
+        """Wire the single-writer fence into the durable write path (INV-C1-4).
+
+        Idempotent; safe to call at boot once the lease/arbiter is resolved. With
+        no guard wired (the default) writes proceed unchecked — preserving the
+        dev/single-node and existing-test behaviour exactly.
+        """
+        self._writer_guard = guard
+        self._worker_id = worker_id
+
+    async def _assert_writer(self) -> None:
+        """Fail closed if a writer guard is wired and this worker is not the leader.
+
+        No-op when no guard is configured (``None``) so the non-HA path is
+        unchanged. A non-leader raises ``LeaderLostError`` (mapped to 503 at the
+        route) — deny-by-default; never two concurrent PG writers (INV-C1-4).
+        """
+        guard = self._writer_guard
+        worker_id = self._worker_id
+        if guard is not None and worker_id is not None:
+            await guard.assert_writer(worker_id)
+        # Durable leader-lease fence (additive; ``None`` ⇒ the non-HA path is
+        # byte-for-byte unchanged). A stale leader whose lease expired (or was taken
+        # over) fails CLOSED here with ``LeaderLostError`` before any durable write —
+        # never two simultaneous durable writers (INV-C1-4).
+        lease = self._leader_lease
+        if lease is not None:
+            await self.assert_leader_lease(worker_id=lease.worker_id, lock_key=lease.lock_key)
+
     async def ensure_schema(self, *, enable_rls: bool = True) -> None:
-        """Create the schema in-process. **Dev-only** (G-H14).
+        """Create the schema in-process. **Dev-only**.
 
         In production the schema is owned by Alembic (``alembic upgrade head``,
         ``migrations/versions/0001_baseline.py``) so that DDL is reviewed,
@@ -251,20 +347,36 @@ class PgEventStore:
         await self._engine.dispose()
 
     # ------------------------------------------------------------------ #
-    # CRUD (G-C9) — SQLite EventStore semantics 1:1.
+    # CRUD — SQLite EventStore semantics 1:1.
     #
     # Every method opens one transaction, sets ``app.tenant_id`` via
     # ``set_config`` (RLS) *and* filters with an explicit ``WHERE tenant_id``
     # (defence in depth: RLS enforces isolation even if a query forgets the
     # filter, the explicit filter enforces it even before non-owner RLS roles
-    # land in Stage 5). ``set_config`` is parameter-bound so the tenant id is
-    # never string-interpolated into SQL (SET LOCAL cannot bind parameters).
+    # land). ``set_config`` is parameter-bound so the tenant id is never
+    # string-interpolated into SQL (SET LOCAL cannot bind parameters).
     # ------------------------------------------------------------------ #
 
     @staticmethod
     async def _bind_tenant(conn: AsyncConnection, tenant: str) -> None:
         from sqlalchemy import text
 
+        # Request-scoped defense-in-depth OVER the existing FORCE RLS (the policies
+        # remain the primary control). When a tenant is bound in the async context
+        # (the request path calls ``core.tenancy.set_current_tenant``),
+        # assert it equals the tenant this read/write targets before binding
+        # ``app.tenant_id``. A mismatch fails closed (belt-and-suspenders). The ""
+        # sentinel is the owner/cross-tenant admin read (``list_pending_approvals(
+        # tenant_id=None)``) and is exempt. An UNBOUND context (background writes:
+        # boot replay, Merkle sealing, archive/purge) raises ``LookupError`` ⇒ no
+        # second guard, RLS alone applies (INV-M2-1; unbound-context edge).
+        if tenant != "":
+            try:
+                ctx_tenant: TenantId | None = current_tenant()
+            except LookupError:
+                ctx_tenant = None
+            if ctx_tenant is not None and str(ctx_tenant) != tenant:
+                raise EventStoreError("tenant context mismatch")
         # set_config(name, value, is_local=true) == SET LOCAL, but value is a
         # bound parameter so a hostile tenant string cannot break out of SQL.
         await conn.execute(
@@ -291,6 +403,10 @@ class PgEventStore:
         """
         from sqlalchemy import text
         from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+        # INV-C1-4: fail closed before any durable write if a single-writer fence
+        # is wired and this worker is not the leader (deny-by-default).
+        await self._assert_writer()
 
         try:
             payload_json = json.dumps(redact(event.payload), ensure_ascii=False)
@@ -355,6 +471,31 @@ class PgEventStore:
             raise EventStoreError(f"failed to query events for {tenant}: {exc}") from exc
         return [_row_to_event(row) for row in rows]
 
+    async def count_events(self, *, tenant_id: TenantId, run_id: str | None = None) -> int:
+        """Count events under the bound tenant (parity with the sync
+        :meth:`EventStore.count_events`).
+
+        Used by the console AuditExplorer pagination via
+        :class:`secugent.db.store_facade.AsyncLiveStore`. RLS-bound + explicit
+        ``WHERE tenant_id`` (defence in depth). Pure read; never mutates.
+        """
+        from sqlalchemy import text
+        from sqlalchemy.exc import SQLAlchemyError
+
+        tenant = str(tenant_id)
+        sql = "SELECT COUNT(*) FROM events WHERE tenant_id = :tenant"
+        params: dict[str, Any] = {"tenant": tenant}
+        if run_id is not None:
+            sql += " AND run_id = :run_id"
+            params["run_id"] = run_id
+        try:
+            async with self._engine.begin() as conn:
+                await self._bind_tenant(conn, tenant)
+                row = (await conn.execute(text(sql), params)).first()
+        except SQLAlchemyError as exc:
+            raise EventStoreError(f"failed to count events for {tenant}: {exc}") from exc
+        return int(row[0]) if row is not None else 0
+
     async def get_event(self, *, tenant_id: TenantId, event_id: str) -> Event | None:
         """Fetch a single event by id under the bound tenant.
 
@@ -388,6 +529,9 @@ class PgEventStore:
     async def upsert_run(self, run: Run) -> None:
         from sqlalchemy import text
         from sqlalchemy.exc import SQLAlchemyError
+
+        # INV-C1-4: single-writer fence (no-op unless wired).
+        await self._assert_writer()
 
         tenant = str(run.tenant_id)
         try:
@@ -521,12 +665,12 @@ class PgEventStore:
                 # tenant_id=None is the owner/admin cross-tenant read (matches the
                 # sync EventStore: all tenants). The explicit ``WHERE tenant_id``
                 # above is the active scope when a tenant *is* given; ``set_config``
-                # binds RLS to either the tenant or "" (no-tenant). In Stage 1 the
-                # app connects as the table owner, which BYPASSES RLS (no FORCE RLS
-                # yet — that is Stage 5 G-C6), so the owner sees all pending here,
-                # exactly like the SQLite reference. When non-owner roles + FORCE
-                # RLS land, this no-tenant path is blocked at the DB — documented
-                # divergence; Stage 1's boot replay stays on SQLite so it is not hit.
+                # binds RLS to either the tenant or "" (no-tenant). In the initial
+                # tier the app connects as the table owner, which BYPASSES RLS (no
+                # FORCE RLS yet), so the owner sees all pending here, exactly like the
+                # SQLite reference. When non-owner roles + FORCE RLS land, this
+                # no-tenant path is blocked at the DB — documented divergence; the
+                # initial boot replay stays on SQLite so it is not hit.
                 await self._bind_tenant(conn, tenant if tenant is not None else "")
                 rows = (await conn.execute(text(sql), params)).fetchall()
         except SQLAlchemyError as exc:
@@ -668,7 +812,139 @@ class PgEventStore:
             return [row[0] for row in result.fetchall()]
 
     # ------------------------------------------------------------------ #
-    # Retention (G-H2) — RLS-aware archive-table pattern. Each call runs in
+    # DURABLE leader lease — TTL+heartbeat row, the live single-writer fence
+    # the session ``pg_advisory_lock`` could NOT provide. A
+    # transaction-scoped ``pg_advisory_xact_lock(lock_key)`` serialises
+    # concurrent acquisitions so the SELECT→decide→UPSERT is atomic per lock
+    # (no phantom double-grant when the row does not yet exist).
+    # ------------------------------------------------------------------ #
+
+    async def acquire_leader_lease(
+        self, *, worker_id: str, ttl_seconds: int, lock_key: int = 0xDEADBEEF
+    ) -> LeaderLease:
+        """Acquire (or take over an EXPIRED) durable leader lease — fail-closed.
+
+        Raises :class:`LeaderLostError` if another worker holds a still-live lease
+        (deny-by-default single writer). On success persists the ``leader_leases``
+        row with ``expires_at = now + ttl_seconds`` and a monotonic fence token.
+        """
+        from sqlalchemy import text
+
+        now = datetime.now(tz=UTC)
+        async with self._engine.begin() as conn:
+            # Serialise all acquisitions for this lock so the read-decide-write is
+            # atomic even for the first (no-row) acquisition.
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": lock_key})
+            row = (
+                await conn.execute(
+                    text("SELECT worker_id, expires_at, fence_token FROM leader_leases WHERE lock_key = :k"),
+                    {"k": lock_key},
+                )
+            ).first()
+            existing = (row[0], row[1], int(row[2])) if row is not None else None
+            granted, fence = _decide_leader_acquisition(existing=existing, now=now, worker_id=worker_id)
+            if not granted:
+                assert existing is not None  # only a live held-by-other row rejects
+                raise LeaderLostError(
+                    f"leader lock {lock_key} held by {existing[0]} until {existing[1].isoformat()}"
+                )
+            expires = now + timedelta(seconds=ttl_seconds)
+            await conn.execute(
+                text(
+                    "INSERT INTO leader_leases(lock_key, worker_id, acquired_at, expires_at, fence_token) "
+                    "VALUES(:k, :w, :acq, :exp, :fence) "
+                    "ON CONFLICT (lock_key) DO UPDATE SET worker_id=EXCLUDED.worker_id, "
+                    "acquired_at=EXCLUDED.acquired_at, expires_at=EXCLUDED.expires_at, "
+                    "fence_token=EXCLUDED.fence_token"
+                ),
+                {"k": lock_key, "w": worker_id, "acq": now, "exp": expires, "fence": fence},
+            )
+        return LeaderLease(
+            worker_id=worker_id, lock_key=lock_key, acquired_at=now, expires_at=expires, fence_token=fence
+        )
+
+    async def renew_leader_lease(self, lease: LeaderLease, *, ttl_seconds: int | None = None) -> LeaderLease:
+        """Heartbeat: extend the lease IFF this worker still holds it (same fence).
+
+        Raises :class:`LeaderLostError` if the lease expired or was taken over
+        (the row no longer matches ``worker_id`` + ``fence_token`` + live) — the
+        stale leader must stop writing. ``ttl_seconds`` defaults to the lease's
+        original duration.
+        """
+        from sqlalchemy import text
+
+        now = datetime.now(tz=UTC)
+        ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else int((lease.expires_at - lease.acquired_at).total_seconds())
+        )
+        expires = now + timedelta(seconds=max(ttl, 0))
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "UPDATE leader_leases SET expires_at = :exp WHERE lock_key = :k AND "
+                        "worker_id = :w AND fence_token = :fence AND expires_at > :now RETURNING acquired_at"
+                    ),
+                    {
+                        "exp": expires,
+                        "k": lease.lock_key,
+                        "w": lease.worker_id,
+                        "fence": lease.fence_token,
+                        "now": now,
+                    },
+                )
+            ).first()
+            if row is None:
+                raise LeaderLostError(
+                    f"cannot renew leader lock {lease.lock_key}: lost to expiry or takeover"
+                )
+            acquired_at = row[0]
+        return LeaderLease(
+            worker_id=lease.worker_id,
+            lock_key=lease.lock_key,
+            acquired_at=acquired_at,
+            expires_at=expires,
+            fence_token=lease.fence_token,
+        )
+
+    async def assert_leader_lease(self, *, worker_id: str, lock_key: int = 0xDEADBEEF) -> None:
+        """Live fence read: raise :class:`LeaderLostError` unless ``worker_id`` holds
+        a non-expired ``leader_leases`` row for ``lock_key`` (called per durable
+        write via :meth:`_assert_writer` when a lease is armed)."""
+        from sqlalchemy import text
+
+        now = datetime.now(tz=UTC)
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT worker_id, expires_at FROM leader_leases WHERE lock_key = :k"),
+                    {"k": lock_key},
+                )
+            ).first()
+        if row is None or row[0] != worker_id or row[1] <= now:
+            raise LeaderLostError(f"worker {worker_id} is not the live leader for lock {lock_key}")
+
+    def set_leader_lease(self, lease: LeaderLease | None) -> None:
+        """Arm (or disarm with ``None``) the durable leader-lease fence on the write
+        path. Idempotent; safe to call at boot once the lease is acquired."""
+        self._leader_lease = lease
+
+    async def release_leader_lease(self, lease: LeaderLease) -> None:
+        """Relinquish the lease IFF still held by this worker (clean handover)."""
+        from sqlalchemy import text
+
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "DELETE FROM leader_leases WHERE lock_key = :k AND worker_id = :w AND fence_token = :fence"
+                ),
+                {"k": lease.lock_key, "w": lease.worker_id, "fence": lease.fence_token},
+            )
+
+    # ------------------------------------------------------------------ #
+    # Retention — RLS-aware archive-table pattern. Each call runs in
     # one transaction that binds ``app.tenant_id`` via ``set_config(..., true)``
     # (SET LOCAL) *and* filters ``WHERE tenant_id`` (defence in depth: RLS +
     # explicit). Archiving COPIES rows into ``events_archive``; purge deletes
@@ -811,7 +1087,7 @@ async def _noop_within_txn(conn: AsyncConnection) -> None:
 
 
 # ---------------------------------------------------------------------------
-# PgChainedEventStore (G-M8) — hash chain persisted in PG ``event_chain``
+# PgChainedEventStore — hash chain persisted in PG ``event_chain``
 # ---------------------------------------------------------------------------
 
 
@@ -837,12 +1113,33 @@ class PgChainedEventStore:
     # -- write path (chained) ------------------------------------------- #
 
     async def append(self, event: Event) -> None:
+        """Append-only chained INSERT (``AsyncEventStore`` protocol — ``-> None``).
+
+        Delegates to :meth:`append_chained` and discards the record, so the
+        protocol contract stays ``-> None`` while the record-returning variant
+        (parity with the SQLite :meth:`ChainedEventStore.append_event`) is
+        available for the :class:`secugent.db.store_facade.AsyncLiveStore`.
+        """
+        await self.append_chained(event)
+
+    async def append_chained(self, event: Event) -> ChainedEventRecord:
+        """Chained append that RETURNS the :class:`ChainedEventRecord`.
+
+        Byte-for-byte equivalent SQL/hash logic to :meth:`append` was before this
+        refactor — the only addition is capturing the computed ``prev_hash``/
+        ``seq``/``event_hash`` so the facade can mirror the SQLite reference's
+        record-returning ``append_event``. The chain link hashes are
+        still computed by the backend-agnostic :mod:`secugent.audit.hash_chain`
+        functions, so the PG chain remains byte-identical to the SQLite chain.
+        """
         from sqlalchemy import text
 
         tenant = str(event.tenant_id)
         # Hash the redacted/normalised stored view so the chain never carries
         # plaintext PII and re-derivation matches the persisted body.
-        body = canonical(stored_view(event))
+        stored = stored_view(event)
+        body = canonical(stored)
+        captured: dict[str, Any] = {}
 
         async def _write_chain_row(conn: AsyncConnection) -> None:
             # Per-tenant serialisation: hold a transaction-scoped advisory lock so
@@ -880,8 +1177,17 @@ class PgChainedEventStore:
                     "body": body,
                 },
             )
+            captured["prev_hash"] = prev_hash
+            captured["seq"] = seq
+            captured["event_hash"] = event_hash
 
         await self._inner.append_event_atomic(event, within_txn=_write_chain_row)
+        return ChainedEventRecord(
+            event=stored,
+            seq=int(captured["seq"]),
+            prev_hash=str(captured["prev_hash"]),
+            event_hash=str(captured["event_hash"]),
+        )
 
     # -- read path + verification --------------------------------------- #
 
@@ -934,7 +1240,7 @@ class PgChainedEventStore:
         event present in the chain but missing from the store (partial-write gap),
         or an ``events`` row whose canonical form no longer matches the chained
         body (underlying store tamper). The chain table is NOT a second source of
-        truth: the ``events`` table is (SECURITY_CONTRACT §5/§10.1)."""
+        truth: the ``events`` table is."""
         last_hash = GENESIS
         for record, body_canonical in await self._iter_chain_rows(tenant_id=tenant_id):
             expected = compute_chain_hash(last_hash, body_canonical)
@@ -968,6 +1274,12 @@ class PgChainedEventStore:
 
     async def query(self, *, tenant_id: TenantId, run_id: str | None = None, limit: int = 100) -> list[Event]:
         return await self._inner.query(tenant_id=tenant_id, run_id=run_id, limit=limit)
+
+    async def count_events(self, *, tenant_id: TenantId, run_id: str | None = None) -> int:
+        return await self._inner.count_events(tenant_id=tenant_id, run_id=run_id)
+
+    async def get_event(self, *, tenant_id: TenantId, event_id: str) -> Event | None:
+        return await self._inner.get_event(tenant_id=tenant_id, event_id=event_id)
 
     async def upsert_run(self, run: Run) -> None:
         await self._inner.upsert_run(run)
@@ -1009,7 +1321,28 @@ class PgChainedEventStore:
     async def list_stale_leases(self) -> list[str]:
         return await self._inner.list_stale_leases()
 
-    # -- Retention (G-H2) — delegate to inner PgEventStore -------------- #
+    # -- DURABLE leader lease — delegate to inner ----------------------- #
+
+    async def acquire_leader_lease(
+        self, *, worker_id: str, ttl_seconds: int, lock_key: int = 0xDEADBEEF
+    ) -> LeaderLease:
+        return await self._inner.acquire_leader_lease(
+            worker_id=worker_id, ttl_seconds=ttl_seconds, lock_key=lock_key
+        )
+
+    async def renew_leader_lease(self, lease: LeaderLease, *, ttl_seconds: int | None = None) -> LeaderLease:
+        return await self._inner.renew_leader_lease(lease, ttl_seconds=ttl_seconds)
+
+    async def assert_leader_lease(self, *, worker_id: str, lock_key: int = 0xDEADBEEF) -> None:
+        await self._inner.assert_leader_lease(worker_id=worker_id, lock_key=lock_key)
+
+    async def release_leader_lease(self, lease: LeaderLease) -> None:
+        await self._inner.release_leader_lease(lease)
+
+    def set_leader_lease(self, lease: LeaderLease | None) -> None:
+        self._inner.set_leader_lease(lease)
+
+    # -- Retention — delegate to inner PgEventStore -------------- #
 
     async def archive_day(self, *, tenant_id: str, day: date) -> int:
         return await self._inner.archive_day(tenant_id=tenant_id, day=day)

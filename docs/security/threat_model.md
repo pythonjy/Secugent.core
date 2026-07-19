@@ -77,7 +77,7 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 
 | Threat | Vector | Control | Ref |
 | --- | --- | --- | --- |
-| Deny an action occurred | Claim a decision/approval never happened | Every decision gate writes a §C-2 schema event (actor, gate, input_hash, rationale, rule_of_two_axes, prev_event_id) to an append-only log, 6-month+ retention | contract §10.1, CLAUDE.md §C-2, `T7` |
+| Deny an action occurred | Claim a decision/approval never happened | Every decision gate writes a structured audit-schema event (actor, gate, input_hash, rationale, rule_of_two_axes, prev_event_id) to an append-only log, 6-month+ retention | contract §10.1, `T7` |
 | Backdate / reorder events | Forge an alternate history | Hash chain fixes order; daily Merkle root is signed and pushed to an object-lock store | `audit/hash_chain.py`, `audit/merkle.py` |
 
 ### I — Information disclosure
@@ -85,7 +85,7 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 | Threat | Vector | Control | Ref |
 | --- | --- | --- | --- |
 | Secrets/PII in logs | Token/RRN written to JSONL or SQLite | `logger.redact()` applied on both sinks; chain hashes the *redacted* `stored_view`, never plaintext | `core/logger.py`, `audit/hash_chain.py`, `T5` |
-| PII in chain body | `body_canonical` carrying plaintext | Chain hashes the redacted/normalised event; regression-tested (SG-20260601-02) | `audit/hash_chain.py` |
+| PII in chain body | `body_canonical` carrying plaintext | Chain hashes the redacted/normalised event; regression-tested | `audit/hash_chain.py` |
 | Leak via error messages | Verbose exceptions exposing internals | `VerifyInputError` and contract exceptions give a cause without dumping payloads; `secugent verify` is read-only and prints locations, not data | `cli/verify.py` |
 | Cross-tenant leakage | One tenant reads another's events | All chain/store reads are scoped by `tenant_id`; verify queries are tenant-filtered | `cli/verify.py`, `audit/hash_chain.py` |
 | Credential exfiltration via tool | Connector leaks a secret on-behalf-of | Credential non-exfiltration + on-behalf-of attribution (EM-06) | contract §11.3 |
@@ -109,8 +109,8 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 
 ## 4. Prompt injection (cross-cutting, T2/T3)
 
-Injection is treated as **unfixable at the model layer** (CLAUDE.md §A-0): we do not
-rely on "the LLM resisting it." Instead:
+Injection is treated as **unfixable at the model layer** (a core SecuGent design
+tenet): we do not rely on "the LLM resisting it." Instead:
 
 - system prompt and untrusted data are separated; LLM responses pass a validation
   harness (parse/field/score/confidence checks → HITL or hard block on failure, §2.4/2.8);
@@ -119,7 +119,7 @@ rely on "the LLM resisting it." Instead:
 - REGULATIONS cannot be relaxed by content — only strengthened, admin-approved.
 
 > Staged boundary: the automatic provenance-based axis-① *producer* (taint
-> propagation) lands in Stage 6 (G-C4). Until then axis ① requires an explicit
+> propagation) lands in a later hardening stage. Until then axis ① requires an explicit
 > declaration; the deterministic engine, gate, and audit production are complete and
 > tested. See `secugent/core/rule_of_two.py` module note. This is a known staged
 > limitation, documented here for honest disclosure.

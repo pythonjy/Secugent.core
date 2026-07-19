@@ -71,7 +71,7 @@ def downgrade(
     the step's tenant (the orchestrator binds tenant context upstream).
 
     A successful downgrade emits ``label.downgraded`` BEFORE the state change
-    (SECURITY_CONTRACT §5: append precedes mutation) — a failing sink leaves the
+    (append precedes mutation) — a failing sink leaves the
     context unchanged (fail-closed).
     """
     if approver_principal.role != "admin":

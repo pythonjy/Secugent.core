@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SQLiteRunStateStore — durable, restart-resilient RunStateStore tests.
 
-Triple test obligation for a deterministic/critical module (CLAUDE.md §B-4a):
+Triple test obligation for a deterministic/critical module:
 unit + property-based (hypothesis) + 100-run determinism, plus the headline
 restart-resilience integration test.
 
@@ -152,7 +152,7 @@ async def test_sqlite_store_persists_across_restarts(tmp_path: Path) -> None:
 async def test_sqlite_store_update_persists_command_and_started_at(
     tmp_path: Path,
 ) -> None:
-    """SG-20260603-11 regression — ``command``/``started_at`` set via metadata
+    """Regression — ``command``/``started_at`` set via metadata
     must survive a process restart.
 
     These two columns were previously omitted from the UPDATE statement, so an
@@ -181,7 +181,7 @@ async def test_sqlite_store_update_persists_command_and_started_at(
 async def test_sqlite_and_inmemory_update_command_equivalent(
     tmp_path: Path,
 ) -> None:
-    """SG-20260603-11 — SQLite and in-memory stores must stay behaviour-equivalent
+    """SQLite and in-memory stores must stay behaviour-equivalent
     when ``command``/``started_at`` are updated via metadata."""
     new_started = datetime(2026, 6, 3, 8, 30, 0, tzinfo=UTC)
 
@@ -317,7 +317,7 @@ async def test_sqlite_store_deterministic_get_100_runs(
 
 
 # --------------------------------------------------------------------------- #
-# list_open_runs (W1 G-C8 follow-up) — boot recovery enumeration
+# list_open_runs (boot recovery follow-up) — boot recovery enumeration
 # --------------------------------------------------------------------------- #
 
 _TERMINAL = (RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED)

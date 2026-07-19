@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Approval token issuance, verification, expiry, and nonce-reuse defenses.
 
-Per SECURITY_CONTRACT §4, every approval token carries a strict
+Every approval token carries a strict
 :class:`secugent.core.contracts.ApprovalScope`. The token is single-use
 (consumed on first successful execution), bound to a fixed nonce that cannot
 be reused, and re-verified at step execution time — never trusted on the
@@ -42,17 +42,41 @@ def _new_nonce() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _risk_band(max_risk: int) -> str:
+    """Map a scope's ``max_risk`` (0-100) to a coarse, low-cardinality band.
+
+    Pure and total over the validated ``ApprovalScope.max_risk`` range (an int
+    in ``[0, 100]``). Thresholds (documented, deterministic):
+
+    * ``max_risk < 34``  → ``"low"``     (roughly the lower third)
+    * ``max_risk < 67``  → ``"medium"``  (the middle third)
+    * otherwise          → ``"high"``    (the upper third)
+
+    The band is used solely as a Prometheus label (APPROVAL_WAIT). Keeping it a
+    fixed 3-element set bounds label cardinality — the raw score is never a
+    label. This is a pure side-effect helper; it makes no decision and never
+    raises for in-range input.
+    """
+    if max_risk < 34:
+        return "low"
+    if max_risk < 67:
+        return "medium"
+    return "high"
+
+
 def _observe_approval_wait(approval: Approval) -> None:
     """Record approval wait time in the APPROVAL_WAIT histogram (S8E).
 
     ``wait_seconds`` is the elapsed time from ``approval.created_at`` to now.
-    We use ``risk_band="unknown"`` because :class:`ApprovalService` does not
-    have direct access to the risk score at decision time; a future stage can
-    pass the risk band explicitly when the risk analyzer is wired in.
+    The ``risk_band`` label is derived from the approval scope's ``max_risk``
+    ceiling via :func:`_risk_band` — the strongest risk this approval is
+    authorized to cover — so the histogram is sliceable by risk tier instead of
+    the former opaque ``"unknown"``.
     """
     wait_seconds = max(0.0, (_utcnow() - approval.created_at).total_seconds())
     tenant_id = str(approval.scope.tenant_id)
-    APPROVAL_WAIT.labels(tenant_id=tenant_id, risk_band="unknown").observe(wait_seconds)
+    band = _risk_band(approval.scope.max_risk)
+    APPROVAL_WAIT.labels(tenant_id=tenant_id, risk_band=band).observe(wait_seconds)
 
 
 class ApprovalService:
@@ -147,7 +171,8 @@ class ApprovalService:
             raise ApprovalError(f"approval is {approval.status}")
         if approval.status == "pending":
             raise ApprovalError("approval not granted yet")
-        if approval.status != "approved":
+        # ApprovalStatus is a closed 6-value Literal; consumed/rejected/expired/revoked/pending all raise above, so only "approved" reaches here and the != arm is unreachable without bypassing pydantic Literal validation.
+        if approval.status != "approved":  # pragma: no cover
             raise ApprovalError(f"approval status invalid: {approval.status}")
 
         if approval.expires_at <= _utcnow():
@@ -217,22 +242,22 @@ class ApprovalService:
         # multi-step scope that merely *contains* this step id is NOT dedicated.
         step_dedicated = scope.step_ids == [step.id]
 
-        # G-C2: generalize the single-axis carve-out to the full Rule of Two
-        # (§A-2.1). A step that trips all three axes (untrusted input + sensitive
+        # Generalize the single-axis carve-out to the full Rule of Two
+        # (Rule of Two). A step that trips all three axes (untrusted input + sensitive
         # access + external comm) can NEVER ride a plan-level pre-approval — it is
         # authorized ONLY by an approval dedicated to this exact step (a fresh,
         # step-scoped HITL). ``connector_action`` is a strict special case of this
         # (it is always axes ②+③ and is additionally forbidden in
         # ``allowed_action_types`` by ``ApprovalScope``). Closing the invariant
         # here in the core means a non-dedicated Rule-of-Two scope can never be
-        # smuggled through, independent of the caller graph (SG-20260604-04).
+        # smuggled through, independent of the caller graph.
         # Axis ① (untrusted_input) is auto-derived by ``RuleOfTwoContext.from_step``
         # from a ``provenance`` block in ``Step.context``, so a provenance-tainted
         # 3-axis step is forced through a step-dedicated HITL here too — no logic
         # change is needed in this gate (it already routes the decision through the
         # single core classifier). The deterministic *producer* that injects that
         # provenance (``HeadAgent.mark_untrusted_source``) is not yet wired into live
-        # planning (BDP_02 항목 5 deferral) — this gate is correct either way, since a
+        # planning (provenance axis deferral) — this gate is correct either way, since a
         # provenance block from any source (LLM plan or future producer) routes here.
         rule_of_two_hitl = requires_hitl(classify_axes(step, RuleOfTwoContext.from_step(step)))
         if rule_of_two_hitl and not step_dedicated:

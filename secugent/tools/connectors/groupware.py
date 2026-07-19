@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — groupware connector (사내 그룹웨어: 메신저·공지·전자결재 알림).
+"""Groupware connector (사내 그룹웨어: 메신저·공지·전자결재 알림).
 
 Same shape as :mod:`secugent.tools.connectors.slack`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a
@@ -73,7 +73,7 @@ class GroupwareConnector(_RateLimitedConnector):
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("groupware connector requires OAuth token via SecretsManager")
-        if http_transport is None:
-            return ConnectorResult(ok=True, payload={"mock": True, "action": action.name})
-        response = await http_transport(action=action, principal=principal, secret_value=secret_value)
+        # per-call transport > bound transport > fail closed (no mock success).
+        transport = self._resolve_transport(http_transport)
+        response = await transport(action=action, principal=principal, secret_value=secret_value)
         return ConnectorResult(ok=bool(response.get("ok", True)), payload=response)

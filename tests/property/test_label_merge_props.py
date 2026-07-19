@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-M3 — property-based invariants for the strengthen-only ``data_labels`` merge.
+"""Property-based invariants for the strengthen-only ``data_labels`` merge.
 
 Mandatory testable invariant on TWO unambiguous axes (spec §3.2):
 
@@ -154,7 +154,7 @@ def test_allowed_actions_widening_always_raises(base_actions: list[ActionType], 
 # --------------------------------------------------------------------------- #
 # Invariant: path_patterns must be a SUPERSET for shared rule_ids.
 #
-# SG-20260606-01: ``_match_data_label`` raises only when a pattern matches, so
+# ``_match_data_label`` raises only when a pattern matches, so
 # MORE patterns ⇒ MORE protection. Removing any pattern always raises; a
 # superset (or equal set) always passes and never drops a base pattern.
 # --------------------------------------------------------------------------- #

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 항목 7 — opt-in adoption telemetry collector (Core observability).
+"""Opt-in adoption telemetry collector (Core observability).
 
 Why
 ---
 The 6-month "adoption metrics" KPI and OEM pitches need a basis for *what is
 actually used*. This collector provides one **without ever shipping PII or
-policy content off-box** (§A-2.6 closed-network first; §A privacy).
+policy content off-box** (closed-network first; privacy-first).
 
 Design (privacy by construction)
 --------------------------------
@@ -20,7 +20,7 @@ Design (privacy by construction)
   name itself is **not** free text: it is validated against a strict
   ``[a-z0-9._]{1,64}`` identifier pattern and rejected otherwise. A caller cannot
   smuggle PII, policy text, a user/tenant id, an email, or an RRN through the
-  feature name (Invariant I2, enforced structurally — deny-by-default §A-2.2).
+  feature name (Invariant I2, enforced structurally — deny-by-default).
   Distinct names are also **cardinality-bounded**: beyond ``max_features``
   buckets, further new names are coalesced into a single overflow bucket so a
   long-running on-prem process can never grow memory or Prometheus label
@@ -127,7 +127,7 @@ class TelemetryCollector:
     ) -> None:
         if max_features < 1:
             raise ValueError("max_features must be >= 1")
-        # Validate the security-critical keying secret at the boundary (§B-8).
+        # Validate the security-critical keying secret at the boundary.
         # An empty/short operator-supplied secret is `not None`, so the previous
         # code used it verbatim as the HMAC key — making the digest reproducible
         # from PUBLIC info alone (``_INSTANCE_HASH_DOMAIN`` + a low-entropy
@@ -212,7 +212,7 @@ class TelemetryCollector:
     def _validate_feature_name(feature: str) -> None:
         """Reject any name outside the closed ``[a-z0-9._]{1,64}`` channel.
 
-        Raised on the system boundary (§B-8): a feature name is untrusted caller
+        Raised on the system boundary: a feature name is untrusted caller
         input and must be validated before it becomes a stored key / label.
         """
         if not feature:

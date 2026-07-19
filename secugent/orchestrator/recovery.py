@@ -152,8 +152,7 @@ async def run_recovery(
     each decision **idempotently**: before acting it re-reads the run's *current*
     persisted state and only acts if that state still warrants the action. Re-
     running with the same ``open_runs`` therefore causes zero duplicate enqueue
-    and zero duplicate state transitions (see the RECOVERY-IDEMPOTENCY invariant
-    in docs/specs/2026-06-06-stage2-gc8-recovery-lease-ha.md).
+    and zero duplicate state transitions (the RECOVERY-IDEMPOTENCY invariant).
 
     * ``resume`` — if still resumable, ``enqueue(record)`` and emit ``run.handover``.
     * ``fail_worker_lost`` — if still unsafe (non-terminal), transition to FAILED

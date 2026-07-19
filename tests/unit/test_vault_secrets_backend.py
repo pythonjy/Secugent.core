@@ -180,7 +180,7 @@ async def test_get_drops_cause_so_traceback_does_not_leak_secret() -> None:
     # ``from None`` is used so the upstream exception (whose message can echo a
     # token) is NOT attached as __cause__. Otherwise a default traceback render
     # (logging.exception / Sentry / uncaught propagation) would leak the token
-    # even though the direct message is clean (SECURITY_CONTRACT §6).
+    # even though the direct message is clean (secrets must never surface in errors).
     backend = _backend(_client(read_side_effect=RuntimeError("token=s.SECRETVALUE leaked")))
     with pytest.raises(VaultBackendError) as exc_info:
         await backend.get("db/password")

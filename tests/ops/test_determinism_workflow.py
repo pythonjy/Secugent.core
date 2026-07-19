@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Parse and assert structural invariants of .github/workflows/determinism.yml.
 
-BDP_05 항목 4 — 결정성 증명 워크플로우 구조 검증.
+결정성 증명 워크플로우 구조 검증.
 
 Note: 릴리스 asset 업로드(SBOM, threat_model.md, SECURITY.md) 인보이런트는
 의도적으로 release.yml 로 이전됐다. 해당 검증은 tests/ops/test_release_workflow.py

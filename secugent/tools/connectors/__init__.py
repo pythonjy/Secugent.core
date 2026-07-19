@@ -28,6 +28,7 @@ from secugent.tools.connectors.registry import (
     ConnectorRegistry,
     ConnectorRegistryError,
 )
+from secugent.tools.connectors.retrieval import RetrievalConnector
 from secugent.tools.connectors.sap import SapConnector
 from secugent.tools.connectors.slack import SlackConnector
 
@@ -46,6 +47,7 @@ __all__ = [
     "JiraConnector",
     "NotionConnector",
     "RateLimitExceeded",
+    "RetrievalConnector",
     "SapConnector",
     "SlackConnector",
     "TokenBucket",

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C8 — resolve_lease_manager + recover_open_runs boot hooks.
+"""resolve_lease_manager + recover_open_runs boot hooks.
 
 resolve_lease_manager is a fail-closed router (HA off by default; in-memory only
 in dev; pg requires a compatible store). recover_open_runs is the lifespan hook

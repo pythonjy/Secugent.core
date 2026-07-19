@@ -56,7 +56,7 @@ def chain_store(tmp_path: Path) -> ChainedEventStore:
 
 # Default seed day — the day most run_once(...) calls below seal. Pinning the
 # event timestamp here (rather than _utcnow) keeps the day-filtered sealer
-# (SG-20260603-20) inclusive of these events regardless of the wall-clock date.
+# inclusive of these events regardless of the wall-clock date.
 _SEED_TS = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
 
@@ -117,7 +117,7 @@ def test_run_once_single_tenant(tmp_path: Path, chain_store: ChainedEventStore) 
 
 
 def test_run_once_seals_only_target_day(tmp_path: Path, chain_store: ChainedEventStore) -> None:
-    """SG-20260603-20: events on D-1 and D-2 → run_once(D-1) seals ONLY D-1.
+    """Events on D-1 and D-2 → run_once(D-1) seals ONLY D-1.
 
     The cumulative chain holds both days' events; the day-filtered root and
     ``event_count`` must reflect D-1's two events alone, never the superset.
@@ -158,7 +158,7 @@ def test_run_once_seals_only_target_day(tmp_path: Path, chain_store: ChainedEven
 def test_run_once_empty_day_is_sentinel_not_cumulative(
     tmp_path: Path, chain_store: ChainedEventStore
 ) -> None:
-    """SG-20260603-20: a day with no events seals the empty-tree sentinel,
+    """A day with no events seals the empty-tree sentinel,
     even when the tenant chain holds events on OTHER days (invariant #2)."""
     _seed_event_at(chain_store, "kb-bank", "plan.created", datetime(2026, 6, 1, 9, 0, tzinfo=UTC))
     sched = DailyMerkleScheduler(
@@ -175,7 +175,7 @@ def test_run_once_empty_day_is_sentinel_not_cumulative(
 def test_run_once_writes_evidence_before_seal_event(
     tmp_path: Path, chain_store: ChainedEventStore, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """SG-20260603-21: if the evidence-file write fails, NO dangling seal event
+    """If the evidence-file write fails, NO dangling seal event
     is appended to the chain (evidence file is written first)."""
     _seed_event_at(chain_store, "kb-bank", "plan.created", datetime(2026, 6, 2, 9, 0, tzinfo=UTC))
     sched = DailyMerkleScheduler(
@@ -614,7 +614,7 @@ def test_kst_fallback_when_no_tzdata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# G-H2 retention — 시나리오 회귀 (200-day accumulation, chain continuity)
+# retention — 시나리오 회귀 (200-day accumulation, chain continuity)
 # --------------------------------------------------------------------------- #
 
 

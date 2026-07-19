@@ -74,6 +74,57 @@ def test_plan_holds_steps_and_risks() -> None:
     assert plan.risks[0].severity == "medium"
 
 
+# -- Plan AI-generated provenance (§C-1) ----------------------------
+
+
+def test_plan_provenance_defaults() -> None:
+    # A bare Plan is still honestly marked AI-generated, with safe model/version
+    # defaults the planner overwrites (INV-H2-2: ai_generated is always True).
+    plan = Plan(tenant_id="legacy-default", run_id="r", goal="g", risks=[Risk(description="x")])
+    assert plan.ai_generated is True
+    assert plan.model_id == "unknown"
+    assert plan.regulations_version == "0.0.0"
+
+
+def test_plan_provenance_stampable() -> None:
+    plan = Plan(
+        tenant_id="legacy-default",
+        run_id="r",
+        goal="g",
+        risks=[Risk(description="x")],
+        model_id="claude-opus-4-7",
+        regulations_version="1.4.2",
+    )
+    assert plan.model_id == "claude-opus-4-7"
+    assert plan.regulations_version == "1.4.2"
+
+
+def test_plan_ai_generated_cannot_be_false() -> None:
+    # INV-H2-2: a forged ``ai_generated=False`` is unrepresentable (Literal[True]).
+    with pytest.raises(ValidationError):
+        Plan(
+            tenant_id="legacy-default",
+            run_id="r",
+            goal="g",
+            risks=[Risk(description="x")],
+            ai_generated=False,  # type: ignore[arg-type]
+        )
+
+
+def test_plan_ai_generated_is_frozen() -> None:
+    # INV-H2-2: the provenance flag is immutable once constructed.
+    plan = Plan(tenant_id="legacy-default", run_id="r", goal="g", risks=[Risk(description="x")])
+    with pytest.raises(ValidationError):
+        plan.ai_generated = True  # type: ignore[misc]  # frozen field — even True is rejected
+
+
+def test_ai_generated_marker_is_korean_constant() -> None:
+    # INV-H2-4: the marker is a fixed Korean-default string (§C-3) — deterministic.
+    from secugent.core.contracts import AI_GENERATED_MARKER
+
+    assert AI_GENERATED_MARKER == "AI 생성: 본 산출물은 AI가 생성했습니다."
+
+
 # -- ApprovalScope --------------------------------------------------------
 
 
@@ -99,6 +150,58 @@ def test_approval_scope_max_risk_bounds() -> None:
             max_risk=101,
             expires_at=_future(),
         )
+
+
+# -- ApprovalScope.rule_of_two_axes (§C-2) --------------------------
+
+
+def _scope(**kw: object) -> ApprovalScope:
+    base: dict[str, object] = {
+        "tenant_id": "legacy-default",
+        "run_id": "r",
+        "step_ids": ["s1"],
+        "allowed_action_types": ["file_read"],
+        "max_risk": 50,
+        "expires_at": _future(),
+    }
+    base.update(kw)
+    return ApprovalScope(**base)  # type: ignore[arg-type]
+
+
+def test_rule_of_two_axes_defaults_empty() -> None:
+    # An axis-free scope honestly carries no axes (not a fabricated fill).
+    assert _scope().rule_of_two_axes == ()
+
+
+def test_rule_of_two_axes_normalized_sorted_unique() -> None:
+    # Caller order/duplication is normalized so a given axis set has exactly one
+    # byte representation (INV-M4-2 uniqueness / INV-M4-3 determinism).
+    scope = _scope(
+        rule_of_two_axes=("external_comm", "untrusted_input", "external_comm"),
+    )
+    assert scope.rule_of_two_axes == ("external_comm", "untrusted_input")
+
+
+def test_rule_of_two_axes_rejects_non_canonical_token() -> None:
+    # A typo'd / forged axis token can never enter an audit row (fail-closed).
+    with pytest.raises(ValidationError):
+        _scope(rule_of_two_axes=("untrusted_input", "not_an_axis"))
+
+
+def test_rule_of_two_axes_is_frozen() -> None:
+    # INV-M4-2: the axis set that justified a HITL approval is fixed at issuance.
+    scope = _scope(rule_of_two_axes=("sensitive_access",))
+    with pytest.raises(ValidationError):
+        scope.rule_of_two_axes = ("external_comm",)  # type: ignore[misc]
+
+
+def test_rule_of_two_axis_tokens_match_axis_enum() -> None:
+    # The literal tokens duplicated in contracts.py (to avoid an import cycle)
+    # MUST equal the Axis enum value set, or the §C-2 schema would silently drift.
+    from secugent.core.contracts import _RULE_OF_TWO_AXIS_TOKENS
+    from secugent.core.rule_of_two import Axis
+
+    assert _RULE_OF_TWO_AXIS_TOKENS == {axis.value for axis in Axis}
 
 
 # -- Approval -------------------------------------------------------------

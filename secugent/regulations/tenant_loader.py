@@ -110,7 +110,7 @@ class RegulationsLoader:
         tenant baseline (relaxation guard still applies). Otherwise the
         normal :meth:`for_tenant` bundle is returned.
         """
-        # SG-20260603-04: an activated canary (share > 0) with no payload is a
+        # an activated canary (share > 0) with no payload is a
         # wiring bug — fail fast instead of silently masking it with the baseline.
         if canary_share > 0.0 and canary_payload is None:
             raise RegulationsLoadError(
@@ -172,7 +172,7 @@ class RegulationsLoader:
         # version = f"{base}+{override}" can exceed the schema's max_length=64 when
         # either token is long or many merges fold (for_tenant / for_run / merge_packs
         # all reach here). Bound BOTH tokens FIRST so ``Regulations(...)`` never raises
-        # a RAW pydantic.ValidationError (SG-20260608-02, finding 5). Bounding lives
+        # a RAW pydantic.ValidationError. Bounding lives
         # in ``_merge`` — the single source of truth for the composite version — so
         # every caller is protected, not just merge_packs. The bound is the identity
         # when the raw tokens already fit, so short-version checksums are unchanged.
@@ -213,8 +213,8 @@ class RegulationsLoader:
           ``label.path_patterns`` matches the normalised path, so MORE patterns
           ⇒ MORE protected paths ⇒ MORE protection. Removing any base pattern
           shrinks the protected scope (a silent deny-by-default relaxation:
-          previously-blocked paths become allowed) and is rejected
-          (SG-20260606-01). Order and duplicates are ignored.
+          previously-blocked paths become allowed) and is rejected.
+          Order and duplicates are ignored.
 
         ``rule_id``\\s absent from ``base`` are appended as new labels. The result
         is deterministic: base order is preserved (with in-place strengthening),
@@ -250,7 +250,7 @@ class RegulationsLoader:
                 f"data_label {base.rule_id!r} override widens allowed_actions "
                 f"{widened!r} (allowlist may only narrow; widening loosens protection)"
             )
-        # SG-20260606-01: path_patterns is the protected *scope*. More patterns =
+        # path_patterns is the protected *scope*. More patterns =
         # more matched paths = more protection (see _match_data_label). An override
         # must be a superset of base; removing any pattern narrows protection and
         # is a deny-by-default relaxation. ``removed`` keeps base order for
@@ -266,7 +266,7 @@ class RegulationsLoader:
     # ------------------------------------------------------------------ #
     # banned_paths / banned_commands / domain_policy — strengthen-only
     #
-    # SG-20260608-01 (BDP item 6, finding 1/5): a same-``rule_id`` override
+    # a same-``rule_id`` override
     # previously replaced a banned_path / banned_command wholesale after only
     # checking severity-downgrade and hard_block-removal. The mechanical_oversight
     # matcher decides a HARD BLOCK from ``pattern`` (both) and ``actions``
@@ -357,14 +357,14 @@ class RegulationsLoader:
         """Raise if ``override`` relaxes the ``domain_policy`` (matcher-aware).
 
         ``_match_domain`` consults EVERY field below, so the guard must too —
-        overlooking one (e.g. ``allow_subdomains``, SG-20260608-03) re-opens a
+        overlooking one (e.g. ``allow_subdomains``) re-opens a
         deny-by-default hole.
 
         * ``mode``: a change between ``allow_list`` and ``deny_list`` inverts the
           block predicate. ``deny_list -> allow_list`` is trivially relaxing when
           the new allowlist contains a formerly-denied host, and the general case
-          is undecidable. So ANY mode change is rejected fail-closed
-          (SG-20260608-03, finding 3) — a coverage/mode change must use an
+          is undecidable. So ANY mode change is rejected fail-closed —
+          a coverage/mode change must use an
           explicit operator-reviewed full document, not a strengthen-only merge.
         * ``allow_list`` mode: a host is blocked unless it is in ``domains``.
           ADDING a domain widens what is permitted = relaxation (reject). Removing
@@ -510,7 +510,7 @@ def _default_root(version: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Korean policy packs (BDP_02 항목 6) — YAML pack loading + strengthen-only merge
+# Korean policy packs — YAML pack loading + strengthen-only merge
 # --------------------------------------------------------------------------- #
 #
 # A *pack* is a ready-to-apply REGULATIONS template shipped under
@@ -525,7 +525,7 @@ def default_packs_dir() -> Path:
     """Return the directory holding the bundled Korean policy packs.
 
     Resolved relative to this module so it works from any working directory and
-    inside an installed wheel (air-gapped / closed-network first, §A-2.6).
+    inside an installed wheel (air-gapped / closed-network first).
     """
     return Path(__file__).resolve().parent / "packs"
 
@@ -586,7 +586,7 @@ def merge_packs(base: Regulations, packs: list[Regulations]) -> Regulations:
     version-bounding now lives inside :meth:`RegulationsLoader._merge` (the single
     source of truth for the merged version label), so ``merge_packs`` simply folds
     each pack through ``_merge`` and the same protection covers ``for_tenant`` /
-    ``for_run`` (SG-20260608-02, finding 5). Controls are untouched.
+    ``for_run``. Controls are untouched.
     """
     effective = base
     for pack in packs:

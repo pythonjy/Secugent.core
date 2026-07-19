@@ -51,7 +51,7 @@ def _load_signed_bundle(path: str | Path) -> SignedBundle:
     data = json.loads(raw)
     if not isinstance(data, dict):
         raise ValueError("signed bundle must be a JSON object")
-    # SG-20260602-04: SignedBundle is a plain dataclass, so SignedBundle(**data)
+    # SignedBundle is a plain dataclass, so SignedBundle(**data)
     # only catches missing/extra keys (TypeError) — not wrong field *value* types.
     # A bundle whose doc_json is a JSON object (dict) would construct fine, then
     # blow up later in verify_bundle with an AttributeError that escapes the

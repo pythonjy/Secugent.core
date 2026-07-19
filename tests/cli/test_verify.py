@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Deterministic TRIPLE for the read-only ``secugent verify`` CLI (BDP item 2).
+"""Deterministic TRIPLE for the read-only ``secugent verify`` CLI.
 
-Layers (CLAUDE.md §B-4a — this exercises the DETERMINISTIC verification path):
+Layers (this exercises the DETERMINISTIC verification path):
 
 * unit — valid fixture -> ok=True; a single-bit tamper of a chained event -> ok=False
   with ``first_violation`` set (I3); read-only invariant (I1); empty-chain edge.
@@ -509,7 +509,7 @@ def test_dispatcher_no_args_returns_two() -> None:
 
 
 def test_dispatcher_run_and_demo_implemented_in_item3() -> None:
-    # BDP Phase 1 item 3 implements the previously-reserved run/demo subcommands;
+    # The previously-reserved run/demo subcommands are now implemented;
     # both now succeed key-less (mock mode). See tests/cli/test_demo.py for depth.
     from secugent.cli.__main__ import main as dispatch
 

@@ -4,8 +4,8 @@
 These types are the *single source of truth* for the data exchanged between
 HEAD/SUB agents, Mechanical Oversight, RISKANALYZER, the approval service, and
 the durable event store. Validation here is intentionally strict — any module
-producing one of these objects must satisfy the fail-closed expectations
-documented in ``docs/security/threat_model.md`` (Tampering / Elevation rows).
+producing one of these objects must satisfy fail-closed validation
+expectations.
 """
 
 from __future__ import annotations
@@ -143,6 +143,15 @@ class Risk(BaseModel):
     severity: Literal["low", "medium", "high", "critical"] = "medium"
 
 
+# AI 식별표시 / 한국 AI 기본법 워터마크: the single standardized,
+# Korean-default identification marker attached to any AI free-text output that is
+# surfaced to a human operator. It is fastened at the orchestrator/runner boundary
+# (NOT inside ``core.llm_client`` — that SDK wrapper stays framework/model-neutral).
+# It is a module-level constant, so it introduces no wall-clock/uuid and is
+# byte-stable across runs (determinism invariant).
+AI_GENERATED_MARKER = "AI 생성: 본 산출물은 AI가 생성했습니다."
+
+
 class Plan(BaseModel):
     """Output of HEAD planner; consumed by Dispatcher after human approval."""
 
@@ -156,6 +165,27 @@ class Plan(BaseModel):
     risks: list[Risk] = Field(default_factory=list)
     assigned_subs: dict[str, str] = Field(default_factory=dict)  # step_id -> sub actor
     approval_id: str | None = None
+    # Immutable provenance proving this plan is an AI-generated artifact.
+    # ``ai_generated`` is ``Literal[True]`` and ``frozen`` so a forged ``False`` is
+    # *unrepresentable* — the value can never be flipped after construction.
+    # ``model_id`` / ``regulations_version`` are stamped by :meth:`HeadAgent.plan`
+    # from the resolved planner model and the active REGULATIONS version. They are
+    # deterministic, wall-clock-free constants/derived strings — NO ``generated_at``
+    # timestamp enters the contract, preserving the determinism digest.
+    # Defaults keep legacy/test ``Plan(...)`` construction backward compatible; the
+    # planner always overwrites them with real values.
+    ai_generated: Literal[True] = Field(default=True, frozen=True)
+    model_id: str = Field(default="unknown", min_length=1, max_length=200)
+    regulations_version: str = Field(default="0.0.0", min_length=1, max_length=64)
+
+
+# ``rule_of_two_axes`` canonical audit tokens. These MUST stay byte-for-byte equal
+# to ``secugent.core.rule_of_two.Axis`` values (``untrusted_input`` /
+# ``sensitive_access`` / ``external_comm``). That module imports from THIS one
+# (``ActionType``/``Step``), so importing ``Axis`` here would create a cycle — the
+# tokens are duplicated as literals and ``tests/unit/test_contracts.py`` asserts
+# they equal the ``Axis`` value set so the two can never silently drift.
+_RULE_OF_TWO_AXIS_TOKENS: frozenset[str] = frozenset({"untrusted_input", "sensitive_access", "external_comm"})
 
 
 class ApprovalScope(BaseModel):
@@ -174,6 +204,29 @@ class ApprovalScope(BaseModel):
     # execution must present the same envelope fingerprint (else fail-closed) —
     # an approval for envelope A cannot authorize envelope B. None ⇒ legacy/unbound.
     envelope_hash: str | None = None
+    # ``rule_of_two_axes``: the Rule of Two axes that the
+    # steps this scope covers trip, computed deterministically at approval-creation
+    # time from ``rule_of_two.axes_for_steps`` over the scoped plan steps. Frozen
+    # (INV-M4-2): the axis set that justified a HITL approval is fixed once the
+    # token is minted — it can never be mutated after issuance. Sorted &
+    # de-duplicated by the validator so the same axis set always serializes
+    # identically. Read back verbatim by the HITL approve/reject emitters so the
+    # audit row carries the real axes (not a dead ``[]`` fill).
+    rule_of_two_axes: tuple[str, ...] = Field(default=(), frozen=True)
+
+    @field_validator("rule_of_two_axes")
+    @classmethod
+    def _canonical_axes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        # Reject any non-canonical axis token fail-closed (a typo'd/forged axis can
+        # never enter an audit row) and normalize to a sorted, de-duplicated tuple
+        # so a given axis set has exactly one byte representation (INV-M4-2/M4-3).
+        unknown = sorted(set(value) - _RULE_OF_TWO_AXIS_TOKENS)
+        if unknown:
+            raise ValueError(
+                f"rule_of_two_axes contains non-canonical axis tokens {unknown} "
+                f"(allowed: {sorted(_RULE_OF_TWO_AXIS_TOKENS)})"
+            )
+        return tuple(sorted(set(value)))
 
     @field_validator("allowed_action_types")
     @classmethod

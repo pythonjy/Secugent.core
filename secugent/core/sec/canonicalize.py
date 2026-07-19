@@ -3,8 +3,8 @@
 
 Reduces a file path / URL / command to a canonical form, **failing closed**
 (:class:`AmbiguousEffectError`) on any input that cannot be unambiguously and
-deterministically normalized. This is invariant **I-E** of the EM series
-(SECURITY_CONTRACT §11): normalization failure ⇒ block.
+deterministically normalized. This is invariant **I-E** of the EM series:
+normalization failure ⇒ block.
 
 Relationship to :mod:`secugent.core.mechanical_oversight` (intended divergence):
 ``normalize_path`` there resolves ``..`` *lexically* and silently anchors at the

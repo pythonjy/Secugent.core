@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MCP tool-server consume adapter (P1, §A-3 P1-3).
+"""MCP tool-server consume adapter (P1).
 
 SecuGent *consumes* an external MCP (Model Context Protocol) tool server by
 wrapping it as a SecuGent :class:`~secugent.tools.connectors.base.Connector`.
@@ -31,9 +31,13 @@ A successful response carries ``result.content`` (mapped to
 
 from __future__ import annotations
 
+import itertools
+import logging
 from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+from pydantic import BaseModel, ConfigDict
 
 from secugent.core.tenancy import Principal
 from secugent.tools.connectors.base import (
@@ -43,12 +47,21 @@ from secugent.tools.connectors.base import (
     ConnectorResult,
     WhitelistViolation,
 )
+from secugent.tools.connectors.transport import SsrfBlocked, guard_url_host
+
+if TYPE_CHECKING:
+    import httpx
 
 __all__ = [
+    "HttpxMCPTransport",
     "MCPConnector",
     "MCPServerConfig",
+    "MCPSettings",
     "MCPTransport",
+    "build_mcp_transport",
 ]
+
+_log = logging.getLogger("secugent.orchestrator.mcp_adapter")
 
 
 class MCPTransport(Protocol):
@@ -196,3 +209,107 @@ class MCPConnector:
             # Non-object content (list / scalar) is wrapped so payload stays a dict.
             return {"content": content}
         return result
+
+
+# --------------------------------------------------------------------------- #
+# Real httpx JSON-RPC 2.0 transport
+# --------------------------------------------------------------------------- #
+
+
+class MCPSettings(BaseModel):
+    """Operator config for the production MCP transport (boot-time).
+
+    ``allow_internal`` is False by default (deny-by-default); set True only
+    for a closed-network 사내 MCP 도구 서버 whose endpoint is RFC-1918.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_internal: bool = False
+
+
+# Monotonic JSON-RPC request id source (process-wide). The id is informational
+# for correlation only — the adapter does not match it against the response, so a
+# shared counter is safe and avoids per-call state.
+_RPC_ID = itertools.count(1)
+
+
+class HttpxMCPTransport:
+    """Real :class:`MCPTransport` — JSON-RPC 2.0 POST to ``{url}`` over httpx.
+
+    ``url`` is already the full ``{server}/rpc`` endpoint (built by
+    :class:`MCPServerConfig.rpc_endpoint`). The credential is sent only as a Bearer
+    header (INV-5); any timeout / network / non-2xx surfaces as a
+    :class:`~secugent.tools.connectors.base.ConnectorError` with NO secret or vendor
+    text, which the :class:`MCPConnector` already translates into its terminal
+    failure. ``httpx`` is imported lazily (INV-8). An injected ``_mock_transport``
+    lets tests drive responses without a socket.
+    """
+
+    def __init__(
+        self,
+        *,
+        allow_internal: bool = False,
+        _mock_transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._allow_internal = allow_internal
+        self._mock_transport = _mock_transport
+
+    async def __call__(
+        self,
+        *,
+        url: str,
+        method: str,
+        params: dict[str, Any],
+        secret_value: str,
+        timeout_sec: float,
+    ) -> dict[str, Any]:
+        try:
+            guard_url_host(url, allow_internal=self._allow_internal)
+        except SsrfBlocked as exc:
+            raise ConnectorError(f"MCP endpoint refused: {exc}") from exc
+
+        httpx = _import_httpx()
+        envelope = {"jsonrpc": "2.0", "id": next(_RPC_ID), "method": method, "params": params}
+        headers = {"Authorization": f"Bearer {secret_value}", "Content-Type": "application/json"}
+        client_kwargs: dict[str, Any] = {"timeout": timeout_sec}
+        if self._mock_transport is not None:
+            client_kwargs["transport"] = self._mock_transport
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                response = await client.post(url, json=envelope, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise ConnectorError("MCP transport timed out") from exc
+        except httpx.TransportError as exc:
+            raise ConnectorError("MCP transport failure: no response") from exc
+
+        if response.status_code >= 400:
+            # No vendor body text (could echo the credential); status only.
+            raise ConnectorError(f"MCP server returned HTTP {response.status_code}")
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ConnectorError("MCP server returned a non-JSON body") from exc
+        if not isinstance(body, dict):
+            raise ConnectorError("MCP server returned a non-object JSON body")
+        return body
+
+
+def _import_httpx() -> Any:
+    """Lazy ``httpx`` import (INV-8: never eager at module import)."""
+    try:
+        import httpx
+    except ImportError as exc:  # pragma: no cover - environment-specific
+        raise ConnectorError(
+            "httpx is required for the production MCP transport; install it or inject a transport"
+        ) from exc
+    return httpx
+
+
+def build_mcp_transport(settings: MCPSettings) -> HttpxMCPTransport:
+    """Materialise the production MCP transport.
+
+    The integration step injects the result into :class:`MCPConnector` (or passes
+    it at ``execute`` time); this module never reaches ``api/main.py`` itself.
+    """
+    return HttpxMCPTransport(allow_internal=settings.allow_internal)

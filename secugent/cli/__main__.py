@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """``secugent`` CLI entry point — subcommand dispatcher.
 
-BDP Phase 1 item 2 wired the read-only ``verify`` subcommand; item 3 adds
-``demo`` (key-less, air-gap-first demo) and ``run`` (a minimal real agent round
-on the mock client). Dispatch is a thin shim: the first positional token selects
-the subcommand and the remaining argv is handed to that subcommand. Unknown or
-absent subcommands fail closed with exit code 2 (§B-8).
+Provides the read-only ``verify`` subcommand plus ``demo`` (key-less,
+air-gap-first demo) and ``run`` (a minimal real agent round on the mock
+client). Dispatch is a thin shim: the first positional token selects the
+subcommand and the remaining argv is handed to that subcommand. Unknown or
+absent subcommands fail closed with exit code 2.
+
+The HTTP API server is part of the SecuGent Enterprise tier and is not
+included in the open-core distribution. Use the Enterprise package for a
+production server deployment.
 """
 
 from __future__ import annotations
@@ -17,11 +21,14 @@ from secugent.cli.verify import main as verify_main
 
 __all__ = ["main"]
 
-_USAGE = "usage: secugent <run|demo|verify> [options]"
+_USAGE = (
+    "usage: secugent <run|demo|verify|evolution|migrate-store|backup|restore|"
+    "rotate-secret|sign-policy-bundle> [options]"
+)
 
 
 def _run_demo_cli(rest: list[str]) -> int:
-    """``secugent demo`` — run the key-less demo and print a §C-2 audit summary."""
+    """``secugent demo`` — run the key-less demo and print a decision-gate audit summary."""
     from secugent.cli.demo import run_demo
 
     result = run_demo()
@@ -68,6 +75,30 @@ def main(argv: list[str] | None = None) -> int:
         return _run_demo_cli(rest)
     if command == "run":
         return _run_agent_cli(rest)
+    if command == "evolution":
+        from secugent.cli.evolution import main as evolution_main
+
+        return evolution_main(rest)
+    if command == "migrate-store":
+        from secugent.cli.migrate_store import main as migrate_store_main
+
+        return migrate_store_main(rest)
+    if command == "backup":
+        from secugent.cli.backup import main as backup_main
+
+        return backup_main(rest)
+    if command == "restore":
+        from secugent.cli.restore import main as restore_main
+
+        return restore_main(rest)
+    if command == "rotate-secret":
+        from secugent.cli.rotate_secret import main as rotate_secret_main
+
+        return rotate_secret_main(rest)
+    if command == "sign-policy-bundle":
+        from secugent.cli.sign_policy_bundle import main as sign_policy_bundle_main
+
+        return sign_policy_bundle_main(rest)
 
     _emit(f"secugent: unknown subcommand {command!r}\n{_USAGE}", stderr=True)
     return 2

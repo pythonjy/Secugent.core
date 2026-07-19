@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Smoke tests for ``examples/`` (BDP Phase 1 item 3, Invariant I3).
+"""Smoke tests for ``examples/`` (Invariant I3).
 
 Every example directory must ship a runnable ``run.py`` that exits 0 with no API
 key and no network — no dead examples. Each is executed as an isolated

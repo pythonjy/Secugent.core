@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Task Dispatcher — routes approved plan steps to SUB agents.
 
-Per Flowchart §1 + §4 + §6, the dispatcher groups steps by their assigned SUB
+The dispatcher groups steps by their assigned SUB
 actor and invokes each SUB on its slice. The dispatcher does NOT re-run
 oversight or risk — that's the SUB's job. It DOES verify that:
 
@@ -18,7 +18,7 @@ the SQLite store's ``RLock`` and event ``append`` likewise, so the groups can
 run concurrently in a :class:`~concurrent.futures.ThreadPoolExecutor` without
 corrupting the audit hash chain. The ``envelope_hash`` is passed *explicitly*
 to each worker's :data:`SubFactory` call (never via a contextvar) so the
-thread boundary stays fail-closed (SG-20260603-01). The merged
+thread boundary stays fail-closed. The merged
 :class:`DispatcherResult` is deterministic: results are keyed by ``actor`` and
 therefore independent of the non-deterministic completion order.
 """
@@ -67,7 +67,7 @@ class DispatcherError(RuntimeError):
     Domain outcomes (hard_block, rejected, tool_failed, approval_failed) are
     carried inside :class:`SubAgentResult` and never surface as this error.
     A ``DispatcherError`` means a worker raised — e.g. the durable event store
-    went down (``HardBlockException``) — and per §B-8 the dispatcher must NOT
+    went down (``HardBlockException``) — and to stay fail-closed the dispatcher must NOT
     swallow it: it is logged to the audit trail and re-raised (fail-closed).
     """
 
@@ -77,9 +77,9 @@ SubFactory = Callable[[str, str, "str | None", "OversightEngine", str], "SubAgen
 regulations_version) -> SubAgent``.
 
 ``oversight`` and ``regulations_version`` are threaded explicitly per dispatch
-(never via a contextvar — same fail-closed boundary as ``envelope_hash``,
-SG-20260603-01) so each run's SUB workers read that run's effective tenant
-REGULATIONS (G-H4) and stamp the effective policy version onto audit events."""
+(never via a contextvar — same fail-closed boundary as ``envelope_hash``)
+so each run's SUB workers read that run's effective tenant
+REGULATIONS and stamp the effective policy version onto audit events."""
 
 
 @dataclass
@@ -101,7 +101,7 @@ class Dispatcher:
         max_workers: int = DEFAULT_MAX_WORKERS,
     ) -> None:
         if max_workers < 1:
-            # Fail fast (§B-8): a non-positive pool size is a programming error.
+            # Fail fast: a non-positive pool size is a programming error.
             raise ValueError(f"max_workers must be >= 1, got {max_workers}")
         self._events = event_store
         self._approvals = approval_service
@@ -122,9 +122,27 @@ class Dispatcher:
         # before any worker starts (state-diagram invariant 1).
         self._sanity_check_approval(plan, approval)
 
+        # Partial approval execution enforcement.
+        # The approval scope authorises EXACTLY ``scope.step_ids``; for a partial
+        # Plan Review approval that is a strict SUBSET of ``plan.steps``. The
+        # dispatcher must dispatch ONLY that approved subset — a deferred
+        # (unselected) step must never be handed to a SUB. Relying on the core
+        # ``_enforce_scope`` to reject it later is NOT sufficient: the SubAgent
+        # catches that ``ApprovalError`` and downgrades it to a fresh step-scoped
+        # HITL (auto-approved in dev / re-prompted in prod), so the deferral would
+        # be silently ignored (INV-W5C-1 / INV-W5C-5). Filtering here keeps deferred
+        # steps un-approved AND un-executed (fail-closed, deny-by-default).
+        #
+        # A full approval mints ``scope.step_ids == every plan step id`` (see
+        # ``HeadAgent.request_plan_approval``), so this filter is a NO-OP on the
+        # legacy/full path — only a genuine partial scope narrows the set.
+        approved_ids = set(approval.scope.step_ids)
+        dispatched_steps = [s for s in plan.steps if s.id in approved_ids]
+        deferred_ids = sorted(s.id for s in plan.steps if s.id not in approved_ids)
+
         # Deterministic grouping: preserve plan.steps order per actor.
         groups: dict[str, list[Step]] = {}
-        for step in plan.steps:
+        for step in dispatched_steps:
             actor = plan.assigned_subs.get(step.id, step.actor)
             groups.setdefault(actor, []).append(step)
 
@@ -136,6 +154,9 @@ class Dispatcher:
                 "plan_id": plan.id,
                 "approval_id": approval.id,
                 "groups": {a: [s.id for s in steps] for a, steps in groups.items()},
+                # Audit transparency: a partial approval records which plan steps
+                # were deferred (left un-approved/un-executed). Empty on full approval.
+                "deferred_step_ids": deferred_ids,
             },
         )
 
@@ -183,13 +204,13 @@ class Dispatcher:
         inline (no pool overhead) and is exactly equivalent to the old
         sequential path (I2).
 
-        ``oversight`` is the per-run engine (G-H4) shared across this run's
+        ``oversight`` is the per-run engine shared across this run's
         workers. The workers only ``evaluate`` (never mutate ``_patches``), and
         STEER writes to the SAME live engine are serialised: ``add_session_patch``
         swaps the patch list copy-on-write under a lock while the matchers read a
         lock-free per-evaluation snapshot. Concurrent group execution therefore
         stays race-free even while a STEER constraint is being added (spec
-        invariant 2; SG-20260606-10).
+        invariant 2).
         """
         if len(groups) <= 1:
             results: dict[str, SubAgentResult] = {}
@@ -233,7 +254,7 @@ class Dispatcher:
         """Construct and run one SUB. ``envelope_hash``, ``oversight`` and
         ``regulations_version`` are passed explicitly to the factory (not via a
         contextvar) so the worker thread re-verifies the approval's envelope
-        binding (I3) and reads the correct per-run policy + version (G-H4)."""
+        binding (I3) and reads the correct per-run policy + version."""
         sub = sub_factory(actor, approval.id, envelope_hash, oversight, regulations_version)
         return sub.run(steps)
 

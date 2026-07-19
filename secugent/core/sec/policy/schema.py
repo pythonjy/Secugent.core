@@ -45,7 +45,7 @@ class Rule(BaseModel):
     @classmethod
     def _non_blank(cls, value: str) -> str:
         # min_length=1 still admits whitespace-only; id/rationale feed the audit
-        # log (§C-2) and must be meaningful.
+        # log (audit) and must be meaningful.
         stripped = value.strip()
         if not stripped:
             raise ValueError("must not be blank/whitespace-only")

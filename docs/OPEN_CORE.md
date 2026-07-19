@@ -20,8 +20,9 @@ is Enterprise -> Core only.
 
 | 패키지 경로 | 분류 | 비고 |
 |-------------|------|------|
-| `secugent/core/` | PUBLIC_CORE | 정책 엔진, Rule of Two, 결정적 모듈 전체. AST clean. |
+| `secugent/core/` | PUBLIC_CORE | 정책 엔진, Rule of Two, grounding 신뢰 경계(`grounding.py`), 결정적 모듈 전체. AST clean. |
 | `secugent/audit/` | PUBLIC_CORE | 해시체인·머클 프리미티브. AST clean (Enterprise 참조는 주석/독스트링만). |
+| `secugent/db/` | PUBLIC_CORE | SQLite→PostgreSQL 감사 체인 마이그레이션 + 동기 store facade. `secugent.core.*`·`audit.hash_chain`만 import. AST clean. |
 | `secugent/steer/` | PUBLIC_CORE | 실시간 중도개입 STEER. AST clean. |
 | `secugent/observability/` | PUBLIC_CORE | 메트릭 프리미티브 (metrics.py, telemetry.py). AST clean. |
 | `secugent/sdk/` | PUBLIC_CORE | 임베드·채택 SDK (decorators.py, gate.py, middleware.py). AST clean. |
@@ -32,7 +33,7 @@ is Enterprise -> Core only.
 | `secugent/prompts/` | PUBLIC_CORE | 프롬프트 레지스트리. AST clean. |
 | `secugent/deploy/` | PUBLIC_CORE | 에어갭 번들 무결성·HA 아비터 (airgap.py, errors.py). AST clean. 시크릿 스캐너 재확인 필수. |
 | `secugent/config.py` | PUBLIC_CORE | 런타임 설정 데이터클래스. AST clean. (단일 모듈, 패키지 아님) |
-| `secugent/orchestrator/` | PUBLIC_CORE (**혼합**) | 12개 파일 AST clean (Core). `runner.py`/`errors.py`는 `secugent.cost.accounting` import로 manifest exclude. |
+| `secugent/orchestrator/` | PUBLIC_CORE | 계획→승인→디스패치 배선 + grounding 생산자 브리지(`evidence_binding.py`·`grounding_context.py`). `runner.py`/`errors.py` 포함 — 선택적 `secugent.cost` 쿼터 티어는 `TYPE_CHECKING`/지연 경로로만 결합돼 import-closed. |
 | `secugent/agents/` | PUBLIC_CORE (**혼합**) | `dispatcher.py`/`head_agent.py` AST clean. `sub_agent.py`는 `secugent.cost.accounting` import로 manifest exclude. |
 | `secugent/models/` | PUBLIC_CORE (**혼합**) | `catalog.py` AST clean. `router.py`는 `secugent.cost.accounting` import (CostLedger, TokenUsage)로 manifest exclude. |
 
@@ -51,6 +52,7 @@ is Enterprise -> Core only.
 | `secugent/identity/` | ENTERPRISE | 옵셔널 add-on, 향후 릴리스로 유보. |
 | `secugent/integrations/` | ENTERPRISE | 옵셔널 외부 커넥터(예: Slack 승인), 향후 릴리스로 유보. |
 | `secugent/desktop/` | ENTERPRISE | 데스크톱 자동화 최후수단 add-on, 향후 릴리스로 유보. |
+| `secugent/playbooks/` | ENTERPRISE | 데스크톱 셸 플레이북. `router.py`가 `secugent.api.security`, `wire.py`가 `secugent.api.main`(AppState)을 import → api 티어(Enterprise)에 결합돼 단방향 의존 경계상 Core 불가, 공개 제외. |
 | `ui/` | ENTERPRISE | 엔터프라이즈 콘솔 프론트엔드. |
 
 > `secugent/tests/`는 `__init__.py` 없는 빈 디렉터리(Python 패키지 미성립, setuptools
@@ -67,6 +69,14 @@ is Enterprise -> Core only.
 | `secugent.identity` | 옵셔널 add-on, 향후 릴리스로 유보 |
 | `secugent.integrations` | 옵셔널 외부 커넥터(예: Slack 승인), 향후 릴리스로 유보 |
 | `secugent.desktop` | 데스크톱 자동화 최후수단 add-on, 향후 릴리스로 유보 |
+
+## 배포 산출물 (top-level `deploy/`) — 비공개
+
+top-level `deploy/` 산출물(`Dockerfile`, `docker-compose.yml`, `.env.example`, Helm 차트,
+에어갭 번들)은 **의도적으로 비공개**다: 이들은 `secugent.api`(Enterprise 티어, 제외)를 부팅하므로
+공개 이미지로는 서버를 띄울 수 없다. 공개 저장소는 **라이브러리 + CLI + SDK**로만 배포되며 부팅
+가능한 HTTP 서버를 포함하지 않는다. Python 패키지 `secugent/deploy/**`(에어갭 번들 무결성·HA
+아비터 프리미티브)는 **다른 경로**이며 위 PUBLIC_CORE 표대로 공개 유지된다.
 
 ## CI Gate
 

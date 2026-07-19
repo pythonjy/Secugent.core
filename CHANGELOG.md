@@ -6,7 +6,33 @@
 
 ## [Unreleased]
 
-- 다음 릴리스를 위한 자리입니다.
+### Added
+
+- **Grounding 신뢰 경계(trust-layer)** — 외부 RAG/검색 결과를 `Evidence` 스키마로만 admit하고
+  taint 추적으로 근거 없는 고영향 결정을 차단하는 경계 계약(`secugent/core/grounding.py`).
+  SecuGent는 RAG 엔진을 구축하지 않고 admit 경계만 소유한다.
+- **Evidence-binding 생산자 브리지** — 커넥터/도구 payload의 `evidence` 를 재검증해 run 컨텍스트·
+  plan에 결정적으로 연결하는 fail-closed 브리지
+  (`secugent/orchestrator/evidence_binding.py`, `grounding_context.py`).
+- **Egress 브로커 상한(ceiling) / LabelResolver** — `EgressBroker.dispatch()` 가 taint 라벨과
+  컨테이너 분류의 상한(max)으로 외부 전송 데이터 등급을 결정하는 단일 라벨 해석 경로
+  (`secugent/io/broker/label_resolver.py`).
+- **STEER 인터럽트 상태(interrupt-state)** — 실행 중 정지 → 재지시 → 재개를 RunRecord의 additive
+  필드로 관리하는 별도 상태기계(`secugent/steer/interrupt_state.py`).
+- **DB 마이그레이션 라이브러리 + 동기 store facade** — append-only 감사 체인을 SQLite →
+  PostgreSQL로 체인 순서대로 이관하고 PG 측에서 해시체인을 재검증하는 마이그레이터
+  (`secugent/db/migrate_sqlite_to_pg.py`, `store_facade.py`).
+- **운영 CLI 명령** — `secugent backup` / `restore`(감사 store lock-safe 스냅샷·복원),
+  `migrate-store`(SQLite→PG 마이그레이션), `rotate-secret`(시크릿 로테이션),
+  `sign-policy-bundle`(egress 정책 번들 오프라인 서명).
+- **관측(observability) 메트릭** — 비용·토큰 귀속 및 런 관측 메트릭 프리미티브
+  (`secugent/observability/`).
+
+### Changed
+
+- **배포 산출물을 공개 배포 범위에서 제외** — `deploy/`(Dockerfile·docker-compose·`.env.example`
+  등)를 공개 저장소에서 제거. `secugent-core` 는 이제 **라이브러리 + CLI + SDK**로만 배포되며,
+  부팅 가능한 HTTP API 서버·웹 콘솔 UI·엔터프라이즈 커넥터는 상용 Enterprise 티어에 속한다.
 
 ## [0.1.0] - 2026-06-13
 

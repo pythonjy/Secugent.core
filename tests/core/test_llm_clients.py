@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 item 10 — domestic/sovereign LLM adapter contract tests.
+"""Domestic/sovereign LLM adapter contract tests.
 
 Covers (§10.8 + §B-8/§B-10):
 * contract conformance (each adapter is an LLMClient; generate returns str),
@@ -28,6 +28,7 @@ from secugent.core.llm_client import (
     LLMError,
     LLMResponseFormatError,
     MockLLMClient,
+    UsageEvent,
     get_default_client,
 )
 from secugent.core.llm_clients import (
@@ -112,6 +113,32 @@ def _ok_clova(text: str = "안녕하세요") -> _FakeResponse:
     return _FakeResponse(
         status_code=200,
         body={"result": {"message": {"role": "assistant", "content": text}}},
+    )
+
+
+def _ok_openai_with_usage(
+    text: str = "안녕하세요", *, prompt: int = 321, completion: int = 123
+) -> _FakeResponse:
+    """OpenAI-compatible success response that exposes provider usage."""
+    return _FakeResponse(
+        status_code=200,
+        body={
+            "choices": [{"message": {"role": "assistant", "content": text}}],
+            "usage": {"prompt_tokens": prompt, "completion_tokens": completion},
+        },
+    )
+
+
+def _ok_clova_with_usage(text: str = "안녕하세요", *, prompt: int = 11, completion: int = 7) -> _FakeResponse:
+    """CLOVA success response that exposes provider usage (camelCase fields)."""
+    return _FakeResponse(
+        status_code=200,
+        body={
+            "result": {
+                "message": {"role": "assistant", "content": text},
+                "usage": {"promptTokens": prompt, "completionTokens": completion},
+            }
+        },
     )
 
 
@@ -400,7 +427,10 @@ def test_get_default_client_prod_builds_concrete(
 def test_get_default_client_dev_builds_concrete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("SECUGENT_ENV", raising=False)
+    # dev must be OPTED IN explicitly (unset ⇒ production, fail-closed). The
+    # old form delenv'd SECUGENT_ENV and relied on the fail-OPEN "dev" default —
+    # encoding the very inconsistency finding #5 flagged. Set it explicitly.
+    monkeypatch.setenv("SECUGENT_ENV", "dev")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("SECUGENT_DOMESTIC_MODEL_ENDPOINT", "https://solar.internal/v1")
     monkeypatch.setenv("SECUGENT_DOMESTIC_MODEL", "solar")
@@ -435,12 +465,32 @@ def test_get_default_client_prod_no_model_refuses(
 def test_get_default_client_dev_no_model_is_mock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("SECUGENT_ENV", raising=False)
+    # Dev (explicitly opted in) + endpoint but no concrete model selector ⇒ Mock is
+    # the intended dev/test convenience. In PROD the same config raises (see below).
+    monkeypatch.setenv("SECUGENT_ENV", "dev")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("SECUGENT_DOMESTIC_MODEL_ENDPOINT", "https://x.internal/v1")
     monkeypatch.delenv("SECUGENT_DOMESTIC_MODEL", raising=False)
     client = get_default_client()
     assert isinstance(client, MockLLMClient)
+
+
+def test_get_default_client_unset_env_is_production_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """INV-C2-1 regression (finding #5): an UNSET ``SECUGENT_ENV`` is
+    PRODUCTION here too, exactly like the auth layer — not the old fail-OPEN "dev".
+
+    With no API key, no concrete domestic model, and the env var unset, an operator
+    who forgot to set ``SECUGENT_ENV`` on a prod box must get a hard ``LLMError``,
+    NOT a silent ``MockLLMClient`` driving the planner/risk_analyzer.
+    """
+    monkeypatch.delenv("SECUGENT_ENV", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("SECUGENT_DOMESTIC_MODEL_ENDPOINT", "https://x.internal/v1")
+    monkeypatch.delenv("SECUGENT_DOMESTIC_MODEL", raising=False)
+    with pytest.raises(LLMError):
+        get_default_client()
 
 
 # ---------------------------------------------------------------------------
@@ -892,3 +942,213 @@ def test_resolve_llm_client_threads_model_id_and_max_retries() -> None:
     client._transport = transport
     client.generate(model="claude-haiku-4-5-20251001", system="sys", messages=_USER_MESSAGES)
     assert transport.calls[0]["json"]["model"] == _DOMESTIC_MODEL_ID
+
+
+# ---------------------------------------------------------------------------
+# COST-01 review (Medium): the sovereign-adapter chokepoint must emit usage
+# ---------------------------------------------------------------------------
+#
+# Regression for the Medium finding: ``create_app`` installs the live recorder
+# onto whatever ``get_default_client`` builds — including a sovereign adapter on
+# the §A-2.6 closed-network-first path. Before this fix ``generate`` returned the
+# parsed text but NEVER called ``_emit_usage``, so in-run metering (INV-2) was
+# silently inert on the very deployment path the spec names: CostLedger never
+# accrued and the per-step self-inflicted-overspend gate could not fire.
+
+
+@pytest.mark.parametrize(
+    "adapter_cls,ok_usage_resp",
+    [
+        (ExaoneLLMClient, _ok_openai_with_usage),
+        (SolarLLMClient, _ok_openai_with_usage),
+        (AxLLMClient, _ok_openai_with_usage),
+        (HyperClovaLLMClient, _ok_clova_with_usage),
+    ],
+)
+def test_sovereign_emits_exact_usage_when_provider_exposes_it(
+    adapter_cls: type[BaseDomesticLLMClient], ok_usage_resp: Any
+) -> None:
+    """When the vendor body carries usage, emit an EXACT event (exact=True)."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport([ok_usage_resp()])
+    client = adapter_cls(
+        endpoint="https://model.internal/v1",
+        transport=transport,
+        usage_observer=events.append,
+    )
+    out = client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert out == "안녕하세요"
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.exact is True
+    assert ev.input_tokens > 0
+    assert ev.output_tokens > 0
+
+
+@pytest.mark.parametrize("adapter_cls,ok_resp", _ALL_ADAPTERS)
+def test_sovereign_emits_estimated_usage_when_provider_omits_it(
+    adapter_cls: type[BaseDomesticLLMClient], ok_resp: Any
+) -> None:
+    """No provider usage in the body → fall back to a length-based ESTIMATE
+    (exact=False), so the ledger still accrues in-run (INV-2/INV-4 honesty)."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport([ok_resp("안녕하세요 반갑습니다")])
+    client = adapter_cls(
+        endpoint="https://model.internal/v1",
+        transport=transport,
+        usage_observer=events.append,
+    )
+    client.generate(
+        model="exaone-3.5",
+        system="너는 한국 금융 보안 비서다.",
+        messages=[{"role": "user", "content": "고객 잔액 조회"}],
+    )
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.exact is False  # never claims unmeasured provider precision (INV-4)
+    assert ev.model == "exaone-3.5"
+    assert ev.input_tokens >= 0
+    assert ev.output_tokens >= 0
+
+
+def test_sovereign_usage_clamps_negative_provider_tokens() -> None:
+    """A garbled negative provider count is clamped to 0 (never sub-zero)."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport([_ok_openai_with_usage(prompt=-5, completion=-9)])
+    client = ExaoneLLMClient(endpoint="https://m/v1", transport=transport, usage_observer=events.append)
+    client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert len(events) == 1
+    assert events[0].input_tokens == 0
+    assert events[0].output_tokens == 0
+
+
+def test_sovereign_no_observer_means_no_emission_and_unchanged_return() -> None:
+    """INV-3 non-breaking: default observer None → generate() -> str unchanged."""
+    transport = _RecordingTransport([_ok_openai_with_usage()])
+    client = ExaoneLLMClient(endpoint="https://m/v1", transport=transport)
+    assert client.usage_observer is None
+    out = client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert out == "안녕하세요"
+
+
+def test_sovereign_raising_observer_never_breaks_generate() -> None:
+    """INV-1 fail-open: an observer that raises must not abort the call."""
+
+    def _boom(_event: UsageEvent) -> None:
+        raise RuntimeError("observer exploded")
+
+    transport = _RecordingTransport([_ok_openai_with_usage()])
+    client = ExaoneLLMClient(endpoint="https://m/v1", transport=transport, usage_observer=_boom)
+    out = client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert out == "안녕하세요"  # response returned despite the observer raising
+
+
+def test_sovereign_failed_call_emits_no_usage() -> None:
+    """A call that never produces text (transport failure) emits no usage."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport([TransportError("t"), TransportError("t"), TransportError("t")])
+    client = ExaoneLLMClient(
+        endpoint="https://m/v1", transport=transport, max_attempts=3, usage_observer=events.append
+    )
+    with pytest.raises(LLMError):
+        client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert events == []
+
+
+def test_sovereign_malformed_usage_falls_back_to_estimate() -> None:
+    """A non-int / non-dict usage field is ignored → estimate, never a crash."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport(
+        [
+            _FakeResponse(
+                status_code=200,
+                body={
+                    "choices": [{"message": {"content": "응답"}}],
+                    "usage": {"prompt_tokens": "oops", "completion_tokens": None},
+                },
+            )
+        ]
+    )
+    client = ExaoneLLMClient(endpoint="https://m/v1", transport=transport, usage_observer=events.append)
+    out = client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert out == "응답"
+    assert len(events) == 1
+    assert events[0].exact is False  # fell back to length estimate
+
+
+def test_sovereign_usage_extraction_raise_is_fail_open() -> None:
+    """If usage extraction itself RAISES, generate still returns (INV-1).
+
+    A vendor ``_extract_usage`` that throws (not just returns None) must not
+    abort the returned response — the emitter wraps the build fail-open.
+    """
+    events: list[UsageEvent] = []
+
+    class _BoomUsageClient(ExaoneLLMClient):
+        def _extract_usage(self, body: Any) -> Any:
+            raise RuntimeError("usage parse exploded")
+
+    transport = _RecordingTransport([_ok_openai()])
+    client = _BoomUsageClient(endpoint="https://m/v1", transport=transport, usage_observer=events.append)
+    out = client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert out == "안녕하세요"  # response returned despite usage extraction raising
+    assert events == []  # nothing emitted — never mis-attributed (fail-open by absence)
+
+
+def test_clova_bool_usage_token_is_rejected_as_unmeasured() -> None:
+    """A stray ``True`` in a usage field is treated as unmeasured (estimate),
+    not silently counted as 1 token (bool is an int subclass)."""
+    events: list[UsageEvent] = []
+    transport = _RecordingTransport(
+        [
+            _FakeResponse(
+                status_code=200,
+                body={
+                    "result": {
+                        "message": {"content": "응답"},
+                        "usage": {"promptTokens": 10, "completionTokens": True},
+                    }
+                },
+            )
+        ]
+    )
+    client = HyperClovaLLMClient(
+        endpoint="https://clova.internal", transport=transport, usage_observer=events.append
+    )
+    client.generate(model="m", system="sys", messages=_USER_MESSAGES)
+    assert len(events) == 1
+    assert events[0].exact is False  # bool rejected → fell back to estimate
+
+
+def test_base_default_extract_usage_returns_none() -> None:
+    """The base ``_extract_usage`` default exposes no usage (subclasses override)."""
+
+    class _NoShapeClient(BaseDomesticLLMClient):
+        vendor = "noshape"
+
+        def _auth_headers(self) -> dict[str, str]:
+            return {}
+
+        def _build_payload(
+            self, *, model: str, system: str, messages: list[dict[str, str]], max_tokens: int
+        ) -> dict[str, Any]:
+            return {}
+
+        def _extract_text(self, body: dict[str, Any]) -> str | None:
+            return "ok"
+
+    client = _NoShapeClient(endpoint="https://m/v1", transport=_RecordingTransport([]))
+    assert client._extract_usage({"usage": {"prompt_tokens": 1, "completion_tokens": 2}}) is None
+
+
+def test_clova_extract_usage_result_not_dict_returns_none() -> None:
+    """Defensive: a CLOVA body whose ``result`` is not a mapping yields no usage."""
+    client = HyperClovaLLMClient(endpoint="https://clova.internal", transport=_RecordingTransport([]))
+    assert client._extract_usage({"result": "not-a-dict"}) is None
+    assert client._extract_usage({}) is None
+
+
+def test_parse_response_backcompat_wrapper_returns_text() -> None:
+    """The retained ``_parse_response`` wrapper composes parse + extract."""
+    client = ExaoneLLMClient(endpoint="https://m/v1", transport=_RecordingTransport([]))
+    assert client._parse_response(_ok_openai("hi")) == "hi"

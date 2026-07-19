@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._base import BaseDomesticLLMClient
+from ._base import BaseDomesticLLMClient, _read_int_pair
 
 __all__ = ["HyperClovaLLMClient"]
 
@@ -62,3 +62,14 @@ class HyperClovaLLMClient(BaseDomesticLLMClient):
             return None
         content = message.get("content")
         return content if isinstance(content, str) else None
+
+    def _extract_usage(self, body: dict[str, Any]) -> tuple[int, int] | None:
+        """CLOVA usage shape: ``result.usage.{promptTokens,completionTokens}``.
+
+        A missing ``result``/``usage`` (older/partial CLOVA bodies) returns
+        ``None`` so the base falls back to a length estimate (exact=False).
+        """
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        return _read_int_pair(result.get("usage"), "promptTokens", "completionTokens")

@@ -32,6 +32,7 @@ __all__ = [
     "DEFAULT_LABEL_MAP",
     "resolve_label",
     "validate_label_keys",
+    "format_allowed_label_keys",
 ]
 
 
@@ -133,3 +134,20 @@ def validate_label_keys(labels: Iterable[str], *, mapping: dict[str, DataLabel] 
     unknown = sorted({lbl for lbl in labels if _normalize_key(lbl) not in mapping})
     if unknown:
         raise LabelMappingError(f"unmapped classification keys: {unknown}")
+
+
+def format_allowed_label_keys(mapping: dict[str, DataLabel] = DEFAULT_LABEL_MAP) -> str:
+    """Render the accepted classification keys as an operator-facing hint.
+
+    Derived from ``mapping`` (the single source of truth) so a hint embedded in an
+    error message can never silently drift from the keys :func:`resolve_label`
+    actually accepts (F5 — the hint was hand-copied to four sites and had already
+    diverged). Deterministic: lattice levels ascending (``PUBLIC``→``SECRET``),
+    keys sorted within each level (ASCII English before Korean). With
+    :data:`DEFAULT_LABEL_MAP` this yields
+    ``"public·공개 / internal·internal_use·내부·대내 / confidential·대외비 / secret·기밀"``.
+    """
+    by_level: dict[DataLabel, list[str]] = {}
+    for key, level in mapping.items():
+        by_level.setdefault(level, []).append(key)
+    return " / ".join("·".join(sorted(by_level[level])) for level in sorted(by_level))

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 1 (G-C9) — thin async adapter over the sync SQLite :class:`EventStore`.
+"""Thin async adapter over the sync SQLite :class:`EventStore`.
 
 Why this exists
 ---------------
 The :class:`secugent.core.event_store_base.AsyncEventStore` protocol is the
 forward-looking (HA, PG) interface. The whole live request/audit/STEER path,
 however, still drives the *synchronous* :class:`secugent.core.event_store.EventStore`
-(Stage 1 keeps live traffic on SQLite — the async cutover is Stage 2). This
-adapter lets the *same* SQLite store satisfy the async protocol so that:
+(the initial tier keeps live traffic on SQLite — the async cutover is the next
+tier). This adapter lets the *same* SQLite store satisfy the async protocol so that:
 
 * the shared contract-equivalence suite can prove SQLite ≡ PG behaviour in CI
   (no Postgres required), and

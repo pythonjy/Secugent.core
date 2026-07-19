@@ -1,0 +1,35 @@
+{
+  "version": "closed-net-template-1.0.0",
+  "tenant_id": "_base",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "allow-internal-krbank-net-send",
+      "effect": "allow",
+      "match": {
+        "kind": "net_send",
+        "sink_class": "internal",
+        "target_glob": "https://*.kr-bank.internal/*"
+      },
+      "rationale": "폐쇄망(closed-net): 내부 전용 은행 도메인(*.kr-bank.internal)으로의 송신만 허용한다 (국정원 N²SF 망분리 · 전자금융감독규정)."
+    },
+    {
+      "id": "allow-internal-krbank-net-recv",
+      "effect": "allow",
+      "match": {
+        "kind": "net_recv",
+        "sink_class": "internal",
+        "target_glob": "https://*.kr-bank.internal/*"
+      },
+      "rationale": "폐쇄망: 내부 전용 은행 도메인(*.kr-bank.internal)으로부터의 수신만 허용한다."
+    },
+    {
+      "id": "hard-block-external-egress",
+      "effect": "hard_block",
+      "match": {
+        "sink_class": "external"
+      },
+      "rationale": "폐쇄망: 외부(EXTERNAL) 싱크로의 모든 egress는 위험점수와 무관하게 HARD BLOCK한다 (§C-1 deny-by-default HARD BLOCK)."
+    }
+  ]
+}

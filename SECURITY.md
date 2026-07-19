@@ -84,10 +84,10 @@ LTS-style backports of Critical fixes are planned).
 - the SecuGent core (`secugent/`), the verification CLI (`secugent/cli/`), the
   audit chain/Merkle (`secugent/audit/`), the deterministic policy engines
   (`secugent/core/mechanical_oversight.py`, `regulations.py`, `rule_of_two.py`,
-  `approval.py`), and the deploy packaging (`deploy/`);
+  `approval.py`);
 - any defeat of a security invariant or fail-closed rule documented in this file
   or `docs/security/threat_model.md`;
-- supply-chain integrity of the published artifacts (SBOM, container image).
+- supply-chain integrity of the published artifacts (SBOM, signed release artifacts).
 
 **Out of scope**
 

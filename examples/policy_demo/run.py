@@ -8,7 +8,7 @@ Run it directly::
 It loads the sibling Korean REGULATIONS document (``policy.ko.json``) and shows
 the deterministic Mechanical Oversight engine HARD-BLOCKing a forbidden
 ``file_write`` to a 대외비 (confidential) directory, independent of any risk
-score (§A-2.2 deny-by-default). No API key, no network.
+score (deny-by-default). No API key, no network.
 
 Exit code 0 if the forbidden step is blocked AND an allowed step passes; non-0
 (fail-closed) if the engine fails to block what it must.

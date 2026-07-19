@@ -50,7 +50,7 @@ class AuditChainBrokenError(RuntimeError):
     """Raised by the verifier when the hash chain does not link cleanly."""
 
 
-# Stage 1 (G-M8): ``GENESIS`` plus the three pure functions below are the
+# ``GENESIS`` plus the three pure functions below are the
 # *single source of truth* for hash-chain determinism. They are backend-agnostic
 # (no SQLite/PG coupling) so the SQLite :class:`ChainedEventStore` and the PG
 # ``PgChainedEventStore`` derive byte-identical ``event_hash`` sequences from the
@@ -88,12 +88,12 @@ def canonical(event: Event) -> str:
 def stored_view(event: Event) -> Event:
     """Return the event exactly as :class:`EventStore` durably persists it.
 
-    The store redacts the payload (SECURITY_CONTRACT §6) and normalises the
+    The store redacts the payload and normalises the
     timestamp to UTC before writing, then reconstructs the event on read. The
     hash chain MUST hash that *redacted, normalised* form — not the raw event —
     so that (a) ``event_hash``/``body_canonical`` never carry plaintext
-    PII/secrets (SG-02) and (b) ``verify_chain`` re-deriving from the store
-    matches the stored hash instead of false-tripping on redaction (SG-01).
+    PII/secrets and (b) ``verify_chain`` re-deriving from the store
+    matches the stored hash instead of false-tripping on redaction.
 
     This mirrors ``EventStore.append_event`` + ``EventStore._row_to_event``;
     a round-trip test keeps the two in lock-step.
@@ -184,7 +184,7 @@ class ChainedEventStore:
                     ),
                 )
 
-            # Atomic write (SG-20260602-02): the event body and its chain row are
+            # Atomic write: the event body and its chain row are
             # committed in a single transaction on the store's connection. If
             # either INSERT fails the whole unit rolls back, so a transient store
             # failure can never leave a dangling chain row that would make

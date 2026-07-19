@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C8 — PgLeaseManager adapter: Protocol→PG method/arg mapping.
+"""PgLeaseManager adapter: Protocol→PG method/arg mapping.
 
 The adapter performs zero SQL; it only renames methods and converts the
 positional :class:`LeaseManager` Protocol arguments into the keyword-only

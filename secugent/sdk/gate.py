@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The single embed-SDK oversight gate — a thin wrapper over the core decision path.
 
-BDP_02 item 4 invariant **I1**: the SDK must call the existing deterministic core
-(``OversightEngine`` + ``rule_of_two`` + the §C-2 audit emitter) and never
+Invariant **I1**: the SDK must call the existing deterministic core
+(``OversightEngine`` + ``rule_of_two`` + the audit emitter) and never
 re-implement control logic. :class:`OversightGate` is the **one** place that
 composes that decision, in the exact order the production ``SubAgent`` uses:
 
@@ -16,14 +16,14 @@ composes that decision, in the exact order the production ``SubAgent`` uses:
    is forced via the injected :class:`~secugent.agents.sub_agent.HitlGateway`; a
    reject/modify/timeout (or, with an :class:`ApprovalService`, a nonce mismatch)
    fails **closed** (:class:`OversightBlocked`).
-3. **§C-2 audit** — every passed action leaves a terminal audit record (I2). A
+3. **Audit** — every passed action leaves a terminal audit record (I2). A
    clean pass emits exactly one ``approve`` event; a soft REGULATIONS violation
    additionally emits a faithful ``violation`` event first (it is NEVER recorded
    as a clean approve); a deny emits a ``reject`` event then raises.
 
 Every public embed surface (``@require_oversight``, ``OversightMiddleware``,
 ``wrap_tool``, the LangChain handler) routes through :meth:`OversightGate.enforce`
-so there is provably no execution path that bypasses oversight (§4.8 boundary
+so there is provably no execution path that bypasses oversight (the boundary
 check). The gate adds **no** policy of its own — its verdict is byte-for-byte the
 core engine's verdict (a determinism test asserts this).
 """
@@ -47,6 +47,8 @@ from secugent.core.rule_of_two import (
     requires_hitl,
 )
 from secugent.core.tenancy import TenantId
+from secugent.observability.logging import log_decision_gate
+from secugent.observability.metrics import record_policy_block
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING so the gate's runtime import surface does not
@@ -75,7 +77,7 @@ class OversightBlocked(RuntimeError):
 
     Distinct from :class:`HardBlockException` (a REGULATIONS deny-by-default
     violation): this is the *human-in-the-loop* denial. Both are fail-closed —
-    the wrapped action never executes. Never swallowed (§B-8).
+    the wrapped action never executes. Never swallowed.
     """
 
 
@@ -91,12 +93,12 @@ class OversightConfigError(RuntimeError):
 
 
 class AuditSink(Protocol):
-    """Minimal sink the gate emits a §C-2 decision-gate event into.
+    """Minimal sink the gate emits a decision-gate event into.
 
     Implemented by callers (an in-memory recorder in tests, a
     :class:`~secugent.audit.hash_chain.ChainedEventStore`-backed writer in
-    production). The gate hands it a plain ``dict`` already shaped to the §C-2
-    schema so the sink stays decoupled from the durable-store types.
+    production). The gate hands it a plain ``dict`` already shaped to the
+    decision-gate schema so the sink stays decoupled from the durable-store types.
     """
 
     def emit(self, event: dict[str, Any]) -> None: ...
@@ -200,7 +202,7 @@ class OversightGate:
     """Composes the core decision path for one embedding scope (I1 single source).
 
     Construct one per tenant/run embedding context and reuse it across wrapped
-    callables. Each emitted §C-2 event carries a globally-unique ``event_id``
+    callables. Each emitted audit event carries a globally-unique ``event_id``
     (uuid4, F7/F11) and threads ``prev_event_id`` from the previous emit so a
     durable sink (:class:`ChainedEventStoreAuditSink`) can derive the same advisory
     ordering — but the **durable** chain integrity is owned by the store, not this
@@ -233,10 +235,10 @@ class OversightGate:
 
     def __post_init__(self) -> None:
         if self.regulations_version is None:
-            # Stamp the engine's effective REGULATIONS version (§C-2 field) without
+            # Stamp the engine's effective REGULATIONS version (audit field) without
             # reaching into private state — the engine exposes it read-only. NOTE
             # (F10): this is the engine's policy id (``Regulations.version``), which
-            # is a free string, NOT a validated semver. The §C-2 audit field is
+            # is a free string, NOT a validated semver. The audit field is
             # therefore the *engine policy id*; consumers must not assume semver.
             self.regulations_version = self.oversight.regulations.version
 
@@ -255,7 +257,7 @@ class OversightGate:
         (a side-effect-free ``evaluate`` — it emits NO audit event) and return the
         FIRST candidate the engine would deny (``not allowed`` — a hard-block OR a
         soft violation). That denied resource then becomes the step's target, so
-        the single §C-2 event ``enforce`` emits reflects the actual violating
+        the single audit event ``enforce`` emits reflects the actual violating
         resource (I2 preserved — exactly one terminal event for the action).
 
         When no candidate is banned we return the primary candidate (the first),
@@ -305,7 +307,7 @@ class OversightGate:
         """Run the full gate for ``step``; raise on any deny (fail-closed).
 
         Order matches ``SubAgent._run_step`` exactly:
-        oversight HARD BLOCK → Rule-of-Two forced HITL → §C-2 audit emit.
+        oversight HARD BLOCK → Rule-of-Two forced HITL → audit emit.
         On a HARD BLOCK a reject event is emitted *then* :class:`HardBlockException`
         is raised. On a HITL denial :class:`OversightBlocked` is raised. On success
         an approve event is emitted and the decision returned.
@@ -334,6 +336,13 @@ class OversightGate:
                     axes=axis_values,
                     actor_type="sec",
                 )
+                # emit POLICY_BLOCK at the embed-SDK hard-block boundary
+                # (best-effort, never raises — INV-3). A distinct entry point
+                # from the SUB path, so the same action is never double-counted.
+                record_policy_block(
+                    tenant_id=str(self.tenant_id),
+                    category=result.violation.category,
+                )
                 # raise_if_blocked() raises the canonical HardBlockException (I1: we
                 # reuse the core's own raise path rather than minting a new error).
                 result.raise_if_blocked()
@@ -342,7 +351,7 @@ class OversightGate:
                 # ``step.oversight_violation`` (severity=warn) — record the matched
                 # rule faithfully in the audit chain BEFORE proceeding, and force
                 # HITL so a policy-flagged action cannot run unreviewed at the embed
-                # boundary (deny-by-default, §A-2.2). The action is NOT auto-approved.
+                # boundary (deny-by-default). The action is NOT auto-approved.
                 soft_violation = True
                 self._emit(
                     step=step,
@@ -366,7 +375,7 @@ class OversightGate:
         if hitl_forced:
             self._enforce_hitl(step, axis_values)
 
-        # 3. §C-2 audit — exactly one terminal pass event for the action (I2). The
+        # 3. Audit — exactly one terminal pass event for the action (I2). The
         #    rationale is honest: it never claims "REGULATIONS 위반 없음" when a soft
         #    rule actually matched.
         if soft_violation:
@@ -531,9 +540,9 @@ class OversightGate:
         axes: list[str],
         actor_type: str,
     ) -> dict[str, Any]:
-        """Build and emit one §C-2 decision-gate event.
+        """Build and emit one decision-gate event.
 
-        F7/F11: ``event_id`` is a fresh uuid4 (per the §C-2 ``uuid`` schema) so two
+        ``event_id`` is a fresh uuid4 (per the audit ``uuid`` schema) so two
         gates sharing one durable sink never collide on the ``event_id TEXT PRIMARY
         KEY``. ``prev_event_id`` threads the previous emit's id as an *advisory*
         ordering hint only — the durable, tamper-evident chain is owned by the
@@ -563,6 +572,22 @@ class OversightGate:
         }
         self.audit.emit(event)
         self._prev_event_id = event_id
+        # D3-RR-01: emit a parallel structured decision-gate record onto the
+        # structlog stream (Loki/ELK), ALONGSIDE — never replacing — the durable
+        # audit emit above. ``log_decision_gate`` is fail-soft (a logging
+        # failure never breaks ``enforce``) and always provides the full 6-field
+        # contract (INV-1/INV-4). Only structural labels are forwarded — no
+        # ``rationale`` / ``input_hash`` / ``target`` / policy body (INV-5).
+        log_decision_gate(
+            event_type=f"gate.{gate}.{decision}",
+            run_id=self.run_id,
+            tenant_id=str(self.tenant_id),
+            severity="warn" if decision in ("reject", "violation") else "info",
+            correlation_id=self.run_id,
+            gate=gate,
+            decision=decision,
+            actor_type=actor_type,
+        )
         return event
 
 
@@ -570,13 +595,13 @@ class ChainedEventStoreAuditSink:
     """A durable, tamper-evident :class:`AuditSink` backed by a
     :class:`~secugent.audit.hash_chain.ChainedEventStore` (F9/F11).
 
-    Maps the §C-2 ``dict`` the gate emits onto a canonical
+    Maps the ``dict`` the gate emits onto a canonical
     :class:`~secugent.core.contracts.Event` and appends it via
     ``ChainedEventStore.append_event`` — so the **durable** ``prev_hash`` / ``seq``
     hash chain (``verify_chain``) covers every SDK-emitted decision-gate event,
     not a volatile in-memory counter. The dict's advisory ``event_id`` /
     ``prev_event_id`` are deliberately NOT trusted for chaining: the store owns the
-    link hashes. The full §C-2 dict is preserved under the event payload so no
+    link hashes. The full audit dict is preserved under the event payload so no
     field (input_hash, rationale, rule_of_two_axes, ...) is lost.
     """
 

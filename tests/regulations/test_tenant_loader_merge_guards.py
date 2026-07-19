@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-M3 companion — branch coverage for the strengthen-only ``_merge`` guards.
+"""Branch coverage for the strengthen-only ``_merge`` guards.
 
 The deterministic-module gate (§B-4a) requires ≥95% line coverage on
 ``secugent/regulations/tenant_loader.py``. The new ``data_labels`` guard is
@@ -98,7 +98,7 @@ def test_banned_command_hard_block_disable_rejected() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# data_labels path_patterns superset guard (SG-20260606-01) — full _merge path
+# data_labels path_patterns superset guard — full _merge path
 # --------------------------------------------------------------------------- #
 
 

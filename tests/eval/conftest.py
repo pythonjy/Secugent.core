@@ -1,53 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""conftest.py — tests/eval 패키지 공용 픽스처 (Stage 8D).
+"""conftest.py — tests/eval 패키지 공용 픽스처.
 
 골든셋 JSONL 로드 및 RiskAnalyzer mock 여부 감지 픽스처를 제공한다.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
+# data model + loader now live in the canonical eval module (single source
+# of truth shared with test_risk_eval.py and scripts/eval_ab.py). Re-exported
+# here so existing ``from tests.eval.conftest import GoldenEntry`` imports stay
+# valid (behaviour unchanged).
+from tests.eval.metrics import GoldenEntry, RiskLevel, load_golden
+
+__all__ = ["GoldenEntry", "RiskLevel", "golden_entries", "is_mock_analyzer"]
+
 _GOLDEN_PATH = Path(__file__).parent / "risk_ko_golden.jsonl"
-
-RiskLevel = Literal["critical", "high", "medium", "low", "none"]
-
-
-@dataclass(frozen=True)
-class GoldenEntry:
-    """골든셋 단일 항목."""
-
-    id: str
-    scenario: str
-    expected_risk: RiskLevel
-    category: str
-    regulation: str | None
-
-
-def _load_golden() -> list[GoldenEntry]:
-    """risk_ko_golden.jsonl 전체를 로드해 GoldenEntry 리스트로 반환한다."""
-    entries: list[GoldenEntry] = []
-    with _GOLDEN_PATH.open(encoding="utf-8") as fh:
-        for _lineno, line in enumerate(fh, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            raw = json.loads(line)
-            entries.append(
-                GoldenEntry(
-                    id=raw["id"],
-                    scenario=raw["scenario"],
-                    expected_risk=raw["expected_risk"],
-                    category=raw["category"],
-                    regulation=raw.get("regulation"),
-                )
-            )
-    return entries
 
 
 @pytest.fixture(scope="session")
@@ -55,7 +26,7 @@ def golden_entries() -> list[GoldenEntry]:
     """세션 스코프 골든셋 픽스처 — 파일이 없으면 skip."""
     if not _GOLDEN_PATH.exists():
         pytest.skip(f"골든셋 파일 없음: {_GOLDEN_PATH}")
-    entries = _load_golden()
+    entries = load_golden(_GOLDEN_PATH)
     if not entries:
         pytest.skip("골든셋 비어 있음")
     return entries

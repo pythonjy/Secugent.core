@@ -31,12 +31,12 @@ __all__ = [
     "resolve_llm_client",
 ]
 
-# BDP_02 item 7: opt-in adoption telemetry flag. Environment variable name is an
+# Opt-in adoption telemetry flag. Environment variable name is an
 # external contract (operator-facing); the value is parsed leniently to a bool.
 TELEMETRY_OPTIN_ENV = "SECUGENT_TELEMETRY_OPTIN"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
-# BDP_02 item 10: sovereign-model selector. Defined locally (not imported from
+# Sovereign-model selector. Defined locally (not imported from
 # secugent.core.llm_clients) so importing settings does NOT eagerly load the
 # concrete adapters — the registry is resolved lazily in resolve_llm_client.
 # Must stay in sync with secugent.core.llm_clients.DomesticModel.
@@ -57,7 +57,7 @@ class LLMSettings(BaseModel):
     # ``None`` = not configured (cloud or mock path).
     domestic_model_id: str | None = None
     domestic_model_endpoint: str | None = None
-    # BDP_02 item 10: which sovereign adapter to build for the domestic endpoint.
+    # Which sovereign adapter to build for the domestic endpoint.
     # ``None`` = no concrete sovereign client selected (mock/cloud path).
     domestic_model: DomesticModel | None = None
 
@@ -87,9 +87,9 @@ def resolve_llm_client(settings: LLMSettings) -> LLMClient:
     Raises :class:`ValueError` on unknown modes; intentionally hard-fails so
     misconfiguration cannot silently fall through to a permissive default.
     """
-    # BDP_02 item 10: a selected sovereign model takes precedence — build the
-    # concrete adapter via the registry (imported lazily to keep settings free
-    # of any concrete-adapter import). The endpoint is guaranteed present by the
+    # A selected sovereign model takes precedence — build the concrete adapter
+    # via the registry (imported lazily to keep settings free of any
+    # concrete-adapter import). The endpoint is guaranteed present by the
     # model validator above.
     if settings.domestic_model is not None:
         from secugent.core.llm_clients import build_domestic_client
@@ -123,9 +123,9 @@ def resolve_llm_client(settings: LLMSettings) -> LLMClient:
 
 
 class TelemetrySettings(BaseModel):
-    """Opt-in adoption telemetry settings (BDP_02 item 7).
+    """Opt-in adoption telemetry settings.
 
-    ``opt_in`` is **False by default** (§A privacy, §A-2.6 closed-network first):
+    ``opt_in`` is **False by default** (privacy-first, closed-network first):
     until an operator explicitly enables it, the collector is a complete no-op.
     The flag feeds :class:`secugent.observability.telemetry.TelemetryCollector`.
     """

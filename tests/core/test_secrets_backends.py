@@ -44,36 +44,19 @@ async def test_env_backend_rotate_not_supported() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Skeleton backends — contract test (NotImplementedError is acceptable)
+# Other backends — both are now fully implemented (no longer skeletons):
 #
-# VaultSecretsBackend is no longer a skeleton (C-3): it is implemented and
-# covered by tests/unit/test_vault_secrets_backend.py. Only AWS Secrets Manager
-# remains a fail-closed skeleton here.
+# * VaultSecretsBackend (C-3) — tests/unit/test_vault_secrets_backend.py
+# * AwsSecretsManagerBackend — tests/core/test_aws_secrets_backend.py
+#
+# rotate() remains a deliberate ``NotImplementedError`` on AWS (backend-side
+# rotation is managed out-of-band, mirroring Vault), so a thin contract test for
+# that lives here.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "factory",
-    [AwsSecretsManagerBackend],
-    ids=["aws_sm"],
-)
-async def test_skeleton_backend_get_raises_not_implemented(
-    factory: type[SecretsBackend],
-) -> None:
-    backend = factory()
-    with pytest.raises(NotImplementedError):
-        await backend.get("anything")
-
-
-@pytest.mark.parametrize(
-    "factory",
-    [AwsSecretsManagerBackend],
-    ids=["aws_sm"],
-)
-async def test_skeleton_backend_rotate_raises_not_implemented(
-    factory: type[SecretsBackend],
-) -> None:
-    backend = factory()
+async def test_aws_backend_rotate_raises_not_implemented() -> None:
+    backend = AwsSecretsManagerBackend(region_name="ap-northeast-2")
     with pytest.raises(NotImplementedError):
         await backend.rotate("anything")
 

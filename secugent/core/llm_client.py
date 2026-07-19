@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-interface LLM client abstraction.
 
-Per master prompt §1 (technology stack) and §0.7 (모듈 경계 엄수), every LLM
+Every LLM
 call in SecuGent goes through this module. Production uses the Anthropic SDK;
 tests and ``ANTHROPIC_API_KEY``-less environments use the deterministic
 :class:`MockLLMClient`.
@@ -22,9 +22,11 @@ It always returns a single string (the assistant message text).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from tenacity import (
@@ -35,6 +37,8 @@ from tenacity import (
     wait_fixed,
 )
 
+from secugent.core.env import is_dev_env
+
 if TYPE_CHECKING:
     from anthropic.types import MessageParam
 
@@ -44,10 +48,47 @@ __all__ = [
     "MockLLMClient",
     "LLMError",
     "LLMResponseFormatError",
+    "UsageEvent",
+    "UsageObserver",
     "RISK_MODEL_DEFAULT",
     "PLANNER_MODEL_DEFAULT",
     "get_default_client",
 ]
+
+_logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# COST-01 — usage observer hook (PUBLIC, cost-agnostic)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class UsageEvent:
+    """Token usage observed for a single ``generate()`` call.
+
+    Carries only primitives so this PUBLIC module never reaches the private
+    ``secugent.cost`` tier (import-closure I2). ``exact`` distinguishes an
+    authoritative provider count (Anthropic ``response.usage``) from a length-
+    based ESTIMATE (mock / a sovereign adapter whose response omits usage) — the
+    private recorder propagates the flag onto the durable ``cost_events`` ledger
+    row (as ``estimated = not exact``) so the ledger never claims unmeasured
+    precision and an operator can split estimated from exact spend (INV-4
+    honesty). The ``LLM_TOKENS`` counter is precision-agnostic (its labels are
+    tenant/model/kind only), so the honest split lives on the ledger.
+    """
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    exact: bool
+
+
+# A usage observer is invoked once per successful ``generate()`` with the
+# observed :class:`UsageEvent`. It is a pure side-effect: its return value is
+# ignored and — critically — any exception it raises is swallowed at the call
+# site (INV-1 fail-open) so metering can never break an LLM call or a run.
+UsageObserver = Callable[["UsageEvent"], None]
 
 
 RISK_MODEL_DEFAULT = os.environ.get("SECUGENT_RISK_MODEL", "claude-haiku-4-5-20251001")
@@ -80,7 +121,22 @@ class LLMClient(ABC):
 
     Subclasses MUST raise :class:`LLMError` on terminal transport failures so
     callers (RiskAnalyzer / HEAD planner) can route to HITL or fail closed.
+
+    COST-01: an OPTIONAL :attr:`usage_observer` may be set (constructor arg or
+    plain attribute assignment) to receive a :class:`UsageEvent` per successful
+    ``generate()``. It defaults to ``None`` so the ``generate() -> str`` contract
+    and every existing caller/test are 100% unchanged (INV-3 non-breaking). The
+    observer is invoked through :meth:`_emit_usage`, which is fail-open (INV-1) —
+    it never raises into ``generate``.
     """
+
+    def __init__(self, *, usage_observer: UsageObserver | None = None) -> None:
+        # Plain settable attribute: ``create_app`` installs the live recorder
+        # AFTER constructing the client (the recorder closes over the CostLedger,
+        # which is itself built separately). Subclasses that do not call
+        # ``super().__init__`` still work because the abstract base sets it here
+        # and the concrete clients below DO chain up.
+        self.usage_observer: UsageObserver | None = usage_observer
 
     @abstractmethod
     def generate(
@@ -93,6 +149,22 @@ class LLMClient(ABC):
         response_format: str | None = None,
     ) -> str:  # pragma: no cover - abstract
         ...
+
+    def _emit_usage(self, event: UsageEvent) -> None:
+        """Invoke the usage observer fail-open (INV-1).
+
+        Called by subclasses AFTER a successful ``generate`` so a metering error
+        can never abort a returned response. Any observer exception is logged at
+        WARN and swallowed — metering is a pure side-effect and must never break
+        an LLM call or a run.
+        """
+        observer = self.usage_observer
+        if observer is None:
+            return
+        try:
+            observer(event)
+        except Exception as exc:  # noqa: BLE001 - metering must never break the call (INV-1)
+            _logger.warning("usage_observer failed (best-effort, ignored): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +185,9 @@ class AnthropicLLMClient(LLMClient):
         api_key: str | None = None,
         max_attempts: int = 3,
         wait_seconds: float = 1.0,
+        usage_observer: UsageObserver | None = None,
     ) -> None:
+        super().__init__(usage_observer=usage_observer)
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self._api_key:
             raise LLMError("ANTHROPIC_API_KEY missing; use MockLLMClient instead")
@@ -145,7 +219,16 @@ class AnthropicLLMClient(LLMClient):
                 messages=typed_messages,
                 max_tokens=max_tokens,
             )
-            return _extract_text(response)
+            text = _extract_text(response)
+            # COST-01: emit the AUTHORITATIVE provider usage (exact=True). Done
+            # after a successful text extraction and BEFORE returning, but the
+            # emit itself is fail-open (INV-1) — usage on the EXACT retried call
+            # that produced ``text`` is what we attribute. ``response.usage`` may
+            # be absent on a partial/garbled body; extraction is best-effort.
+            usage = _extract_usage(response, model=model)
+            if usage is not None:
+                self._emit_usage(usage)
+            return text
 
         try:
             for attempt in Retrying(
@@ -171,7 +254,7 @@ def _to_message_params(
     The public :meth:`LLMClient.generate` contract accepts plain dicts so the
     abstraction stays SDK-agnostic. The Anthropic SDK requires ``role`` to be
     ``"user"`` or ``"assistant"``; any other role is a caller bug, so we fail
-    fast (§B-8) rather than silently coerce.
+    fast rather than silently coerce.
     """
     out: list[MessageParam] = []
     for msg in messages:
@@ -202,6 +285,30 @@ def _extract_text(response: Any) -> str:
     return "".join(parts)
 
 
+def _extract_usage(response: Any, *, model: str) -> UsageEvent | None:
+    """Best-effort read of ``response.usage`` into an EXACT :class:`UsageEvent`.
+
+    The Anthropic SDK exposes ``response.usage.input_tokens`` /
+    ``.output_tokens``. A response without a usable ``.usage`` (partial body, a
+    future SDK shape) yields ``None`` — the caller simply skips emission rather
+    than crash a successful text return (INV-1). Negative/garbled token counts
+    are clamped to 0 here so the recorder/metric never sees a sub-zero value.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    in_tokens = getattr(usage, "input_tokens", None)
+    out_tokens = getattr(usage, "output_tokens", None)
+    if not isinstance(in_tokens, int) or not isinstance(out_tokens, int):
+        return None
+    return UsageEvent(
+        model=model,
+        input_tokens=max(0, in_tokens),
+        output_tokens=max(0, out_tokens),
+        exact=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Mock client
 # ---------------------------------------------------------------------------
@@ -228,12 +335,20 @@ class MockLLMClient(LLMClient):
         responder: Any = None,
         fail_n: int = 0,
         exception: BaseException | None = None,
+        usage_observer: UsageObserver | None = None,
+        usage_override: Callable[[str, str, list[dict[str, str]], str], UsageEvent] | None = None,
     ) -> None:
+        super().__init__(usage_observer=usage_observer)
         self.queue_: list[str] = list(responses or [])
         self.responder = responder
         self.fail_n = fail_n
         self.exception = exception or LLMError("mock-llm-failure")
         self.calls: list[dict[str, Any]] = []
+        # COST-01 test hook: override the ESTIMATED usage a mock call emits.
+        # Signature: ``(model, system, messages, output) -> UsageEvent``. Lets a
+        # test pin an exact-looking event (e.g. ``exact=True`` with known token
+        # counts) to assert recorder/ledger behaviour without a real provider.
+        self.usage_override = usage_override
 
     def queue(self, text: str) -> None:
         self.queue_.append(text)
@@ -263,10 +378,38 @@ class MockLLMClient(LLMClient):
             self.fail_n -= 1
             raise self.exception
         if self.responder is not None:
-            return str(self.responder(self.calls[-1]))
-        if not self.queue_:
-            return "{}"
-        return self.queue_.pop(0)
+            output = str(self.responder(self.calls[-1]))
+        elif not self.queue_:
+            output = "{}"
+        else:
+            output = self.queue_.pop(0)
+        # COST-01: emit an ESTIMATED usage event (exact=False) so tests can prove
+        # the ledger grows without a real provider. The estimate is length-based
+        # (~4 chars/token, the public per-spec heuristic). Emission is fail-open
+        # (INV-1) and happens AFTER ``output`` is resolved so the returned text is
+        # never affected. Build the event INSIDE the try/except so a raising
+        # ``usage_override`` (a test-only hook) can never escape ``generate`` —
+        # symmetric with ``_base.py._emit_response_usage`` (review fix).
+        try:
+            event = self._mock_usage(model, system, messages, output)
+        except Exception as exc:  # noqa: BLE001 - metering must never break the call (INV-1)
+            _logger.warning("mock usage estimation failed (best-effort, ignored): %s", exc)
+        else:
+            self._emit_usage(event)
+        return output
+
+    def _mock_usage(self, model: str, system: str, messages: list[dict[str, str]], output: str) -> UsageEvent:
+        if self.usage_override is not None:
+            return self.usage_override(model, system, messages, output)
+        # Length-based ESTIMATE: input ≈ system + all message contents, output ≈
+        # response length, both at ~4 chars/token. exact=False (INV-4 honesty).
+        input_chars = len(system) + sum(len(m.get("content", "")) for m in messages)
+        return UsageEvent(
+            model=model,
+            input_tokens=input_chars // 4,
+            output_tokens=len(output) // 4,
+            exact=False,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +439,16 @@ def get_default_client() -> LLMClient:
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     domestic_endpoint = os.environ.get("SECUGENT_DOMESTIC_MODEL_ENDPOINT", "").strip()
-    is_production = os.environ.get("SECUGENT_ENV", "") == "production"
+    # INV-C2-1: the dev/prod decision is made by the ONE shared decider
+    # (:func:`secugent.core.env.is_dev_env`, also re-exported as
+    # ``secugent.api.env.is_dev_env``) — no private copy of the literal. The default
+    # is fail-closed: an UNSET/blank ``SECUGENT_ENV`` is production, so a prod box
+    # whose operator forgot the var raises ``LLMError`` instead of silently handing
+    # the planner/risk_analyzer a ``MockLLMClient`` (which returns "{}" and defeats
+    # the probabilistic security controls). The previous ``default "dev"`` here was
+    # the LAST surviving fail-OPEN copy and disagreed with the auth layer on the
+    # unset case.
+    is_production = not is_dev_env()
 
     if api_key:
         try:
@@ -310,11 +462,11 @@ def get_default_client() -> LLMClient:
 
     if domestic_endpoint:
         # Domestic model endpoint configured → honour it.
-        # BDP_02 item 10: when a concrete sovereign model is selected via
-        # SECUGENT_DOMESTIC_MODEL, build the real adapter (prod AND dev) so
-        # closed-network/sovereign deployments get a real model — never a Mock.
+        # When a concrete sovereign model is selected via SECUGENT_DOMESTIC_MODEL,
+        # build the real adapter (prod AND dev) so closed-network/sovereign
+        # deployments get a real model — never a Mock.
         # The registry is imported lazily here so importing this module never
-        # pulls the concrete adapters (model-neutral core isolation, §A-2.3).
+        # pulls the concrete adapters (model-neutral core isolation).
         domestic_model = os.environ.get("SECUGENT_DOMESTIC_MODEL", "").strip()
         if domestic_model:
             from secugent.core.llm_clients import build_domestic_client

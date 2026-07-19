@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """REGULATIONS schema + loader.
 
-Per SECURITY_CONTRACT §8 the regulations module owns *parsing and schema
+The regulations module owns *parsing and schema
 validation only*. The matching logic lives in
 :mod:`secugent.core.mechanical_oversight` so that the deterministic checks can
 be unit-tested without touching disk.
 
-Four rule categories per master prompt PHASE 1:
+Four rule categories:
 
 * :class:`BannedPath`     — glob patterns of forbidden file paths
 * :class:`DomainPolicy`   — allow/deny list with subdomain + IP controls
@@ -121,7 +121,7 @@ class Regulations(BaseModel):
     domain_policy: DomainPolicy | None = None
     banned_commands: list[BannedCommand] = Field(default_factory=list)
     data_labels: list[DataLabel] = Field(default_factory=list)
-    # P2 (§A-3 P2-4): per-connector REGULATIONS slice, keyed by connector name.
+    # P2: per-connector REGULATIONS slice, keyed by connector name.
     # Absent in a legacy document ⇒ empty dict (backward-compatible). The
     # tenant_loader merges these strengthen-only (additive allowlists).
     connector_policies: dict[str, ConnectorPolicy] = Field(default_factory=dict)

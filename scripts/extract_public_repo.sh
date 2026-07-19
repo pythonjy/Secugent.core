@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # scripts/extract_public_repo.sh
-# SecuGent 공개 repo 추출 스크립트 — BDP_05 항목 3
+# SecuGent 공개 repo 추출 스크립트
 #
 # 사용법:
 #   bash scripts/extract_public_repo.sh [OPTIONS]
@@ -279,7 +279,7 @@ GATE_SCRIPT="${REPO_ROOT}/scripts/check_public_release.py"
 
 if [[ ! -f "${GATE_SCRIPT}" ]]; then
     die 3 "사전 게이트 스크립트를 찾을 수 없습니다: ${GATE_SCRIPT}
-BDP_05 항목 2(Unit 2)가 먼저 완료되어야 합니다."
+공개 릴리스 게이트 스크립트가 먼저 준비되어야 합니다."
 fi
 
 log_info "═══ [게이트 1/4] import-closure + 시크릿 스캔 사전 게이트 ═══"
@@ -423,7 +423,7 @@ cat >&2 <<DONE
   2. secugent verify --determinism  (100회 해시 일치 확인)
   3. secugent demo                  (무키 동작 확인)
   4. release/PUBLIC_RELEASE_RUNBOOK.md 섹션 6 퍼블리시 핸드오프 절차 수행
-  전역 차단 게이트 미통과 시 퍼블리시 금지 (BDP_05)
+  전역 차단 게이트 미통과 시 퍼블리시 금지
 ═══════════════════════════════════════════════════════════════
 DONE
 

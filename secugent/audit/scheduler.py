@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""20260603-02-BE — daily Merkle root sealing scheduler.
+"""Daily Merkle root sealing scheduler.
 
 EU AI Act Art.26 requires high-risk-AI operators to retain machine-generated
 logs for 6+ months. SecuGent's hash chain (:mod:`secugent.audit.hash_chain`)
 already links every event tamper-evidently; this scheduler closes the loop by
 **sealing** each tenant's daily event hashes into a signed Merkle root
 (:class:`secugent.audit.merkle.SignedMerkleRoot`) and persisting an append-only
-evidence file plus an ``audit.merkle_sealed`` chain event (§C-2).
+evidence file plus an ``audit.merkle_sealed`` chain event.
 
-Design (see ``docs/specs/2026-06-03-audit-merkle-scheduler.md``):
+Design:
 
 * stdlib only — :class:`threading.Thread` + :class:`threading.Event` for a
-  graceful, leak-free background loop. No APScheduler/croniter (§A-2.6
-  air-gapped/on-prem first; daily once is trivial without a 3rd-party
+  graceful, leak-free background loop. No APScheduler/croniter (air-gapped /
+  on-prem first; daily once is trivial without a 3rd-party
   scheduler).
 * Evidence file ``output_dir/YYYY/MM/merkle_YYYYMMDD.json`` is append-only:
   re-sealing the same day raises :class:`FileExistsError` (a re-seal attempt is
@@ -40,12 +40,12 @@ __all__ = ["DailyMerkleScheduler", "RetentionHook"]
 
 # A retention pass driven once per seal. Receives the sealed day; runs AFTER the
 # seal (file + chain) is durably committed so a retention failure can never roll
-# back a seal (G-H2 fail-closed ordering).
+# back a seal (fail-closed ordering).
 RetentionHook = Callable[[date], None]
 
 _LOG = logging.getLogger("secugent.audit.scheduler")
 
-# Fixed +09:00 fallback so the evidence timestamp stays KST (§C-3) even on
+# Fixed +09:00 fallback so the evidence timestamp stays KST even on
 # air-gapped hosts that ship without the IANA tzdata database.
 _KST = timezone(timedelta(hours=9), "KST")
 
@@ -75,8 +75,7 @@ class _PendingSealEvent:
 
     Writing the evidence file first then appending the chain event (which only
     back-references the file via ``evidence_rel``) guarantees the chain never
-    holds a dangling ``evidence_path`` after a file-write failure
-    (SG-20260603-21).
+    holds a dangling ``evidence_path`` after a file-write failure.
     """
 
     tenant_id: str
@@ -156,12 +155,12 @@ class DailyMerkleScheduler:
 
         Only the events whose timestamp falls on ``day`` (UTC boundary) are
         sealed — the evidence file's ``day``/``event_count`` describe exactly
-        that day's set, not the tenant's cumulative chain (SG-20260603-20).
+        that day's set, not the tenant's cumulative chain.
 
         Returns the roots that were successfully sealed. A tenant whose hashes
         cannot be read is logged and skipped; the rest of the run continues.
         The evidence file is written *before* the back-referencing seal events
-        are appended (SG-20260603-21), so a file-write failure never leaves a
+        are appended, so a file-write failure never leaves a
         dangling ``evidence_path``. Re-sealing a day whose evidence file already
         exists raises :class:`FileExistsError`.
         """
@@ -177,7 +176,7 @@ class DailyMerkleScheduler:
         sealed: list[SignedMerkleRoot] = []
         lines: list[str] = []
         # Defer seal-event appends until AFTER the evidence file is durably
-        # written (SG-20260603-21). The evidence file is the primary record and
+        # written. The evidence file is the primary record and
         # the chain event only back-references it via ``evidence_path``; writing
         # the file first means a file-write failure can never leave a dangling
         # seal event pointing at a non-existent evidence file.
@@ -202,7 +201,7 @@ class DailyMerkleScheduler:
                 pending.event_count,
                 pending.evidence_rel,
             )
-        # Retention runs LAST (G-H2): the seal (file + chain) is the primary
+        # Retention runs LAST: the seal (file + chain) is the primary
         # compliance artifact and is already committed. A retention failure is
         # best-effort cleanup and must never roll back a seal, so it is logged
         # and swallowed here (fail-closed ordering).
@@ -228,7 +227,7 @@ class DailyMerkleScheduler:
             # Day-scoped: seal only the events that actually fall on ``seal_day``
             # (UTC boundary, consistent with the "yesterday UTC" target) so the
             # evidence file's day/event_count describe that day's set, not the
-            # tenant's full cumulative chain (SG-20260603-20).
+            # tenant's full cumulative chain.
             hashes = list(self._chain_store.iter_hashes_for_day(tenant_id=tenant_id, day=seal_day, tz=UTC))
         except Exception:  # noqa: BLE001 - isolate one tenant's failure
             _LOG.error(

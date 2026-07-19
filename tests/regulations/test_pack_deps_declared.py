@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 항목 6 — PyYAML 의존성 선언 회귀 가드 (§B-9, §A-2.6 폐쇄망 우선).
+"""PyYAML 의존성 선언 회귀 가드 (§B-9, §A-2.6 폐쇄망 우선).
 
 ``secugent/regulations/tenant_loader.py`` 는 모듈 최상단에서 ``import yaml`` 한다.
 이 모듈은 결정적 REGULATIONS 경로(§B-4a)의 일부이며 ``for_tenant`` / ``for_run``

@@ -44,6 +44,25 @@ HaBackend = Literal["memory", "sqlite", "pg"]
 VirtualDesktopBackendName = Literal["docker", "windows_sandbox", "stub"]
 VirtualDesktopLifecycle = Literal["per_run", "per_sub", "persistent"]
 
+# Deny-by-default truthy tokens for boolean env flags. Only these explicit values
+# enable a flag; anything else (unset/blank/"0"/"false"/typo) stays off so a
+# misspelled env can never silently activate a multi-node code path.
+_TRUTHY_ENV_TOKENS: frozenset[str] = frozenset({"1", "true", "yes"})
+
+
+def _default_ha_enabled() -> bool:
+    """Resolve HA (multi-replica) mode from ``SECUGENT_HA_ENABLED``.
+
+    This is the SINGLE source of truth for ``ha_enabled``. The field
+    was previously a bare ``False`` default with no env reader, so create_app's
+    ``config or SecuGentConfig()`` boot never activated the single-writer guard
+    (``_assert_ha_single_writer_safe``) — a shipped container running HA on per-pod
+    SQLite would silently fork the audit chain. Deny-by-default: only the explicit
+    truthy tokens (1/true/yes, case-insensitive) enable HA; unset/blank/unknown →
+    False so existing single-node installs are byte-for-byte unaffected."""
+    raw = os.environ.get("SECUGENT_HA_ENABLED", "").strip().lower()
+    return raw in _TRUTHY_ENV_TOKENS
+
 
 @dataclass
 class OrchestratorConfig:
@@ -59,19 +78,25 @@ class OrchestratorConfig:
     # previous default was a bare ``"memory"``, which was indistinguishable from an
     # explicit choice and so silently swallowed the prod fail-fast path.
     run_state_backend: RunStateBackend | None = None
-    # Filesystem path for the ``"sqlite"`` run-state backend (G-C7). Ignored by
-    # the ``"memory"`` backend. ``":memory:"`` selects an ephemeral in-process
+    # Filesystem path for the ``"sqlite"`` run-state backend. Ignored by the
+    # ``"memory"`` backend. ``":memory:"`` selects an ephemeral in-process
     # SQLite DB. Resolved into a store by
     # :func:`secugent.orchestrator.wiring.resolve_run_state_store`.
     run_state_db_path: str = "data/run_state.db"
     fail_fast: bool = True
-    # HA single-leader lease (G-C8). OFF by default = single-node, so existing
-    # boots are unchanged. ``resolve_lease_manager`` returns ``None`` while
+    # HA single-leader lease. OFF by default = single-node, so existing boots
+    # are unchanged. ``resolve_lease_manager`` returns ``None`` while
     # ``ha_enabled`` is falsy; when enabled it selects a lease backend by
     # ``ha_backend`` (falling back to ``run_state_backend``). In-memory HA is
     # dev-only (it cannot guarantee a single leader across nodes); ``"pg"``
     # requires a PG event store exposing the lease primitives.
-    ha_enabled: bool = False
+    #
+    # read from ``SECUGENT_HA_ENABLED`` at construction (via
+    # :func:`_default_ha_enabled`) so create_app's ``config or SecuGentConfig()``
+    # default reflects the operator's HA choice and the single-writer boot guard
+    # becomes reachable. An explicit ``OrchestratorConfig(ha_enabled=…)`` still
+    # overrides the env (callers/tests keep full control).
+    ha_enabled: bool = field(default_factory=_default_ha_enabled)
     ha_backend: HaBackend = "memory"
 
 
@@ -99,7 +124,7 @@ class DockerBackendConfig:
     cpu_limit: float = 1.0
     mount_paths: list[MountSpec] = field(default_factory=list)
     read_only_root: bool = True
-    # The sandbox_roots cross-check (master prompt 3.5) — orchestrator
+    # The sandbox_roots cross-check — orchestrator
     # populates this from the workspace's sandbox configuration. Empty means
     # "no rw mounts allowed".
     sandbox_roots: list[str] = field(default_factory=list)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — SAP connector (ERP 전표·구매요청 등 회사코드·트랜잭션 통제).
+"""SAP connector (ERP 전표·구매요청 등 회사코드·트랜잭션 통제).
 
 Same shape as :mod:`secugent.tools.connectors.jira`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a
@@ -63,7 +63,7 @@ class SapConnector(_RateLimitedConnector):
     actions = ("post_document", "create_purchase_req", "read_document", "search")
 
     async def validate_action(self, action: ConnectorAction, policy: ConnectorPolicy) -> None:
-        # Connector-wide allow-none floor (fail-closed, §A-2.2): an empty company
+        # Connector-wide allow-none floor (fail-closed, deny-by-default): an empty company
         # allowlist HARD-BLOCKS every SAP action — including ``search`` — so the
         # safest/default policy state denies all financial-ERP egress. This mirrors
         # jira.validate_action raising unconditionally when allowed_projects is empty.
@@ -97,7 +97,7 @@ class SapConnector(_RateLimitedConnector):
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("sap connector requires service token via SecretsManager")
-        if http_transport is None:
-            return ConnectorResult(ok=True, payload={"mock": True, "action": action.name})
-        response = await http_transport(action=action, principal=principal, secret_value=secret_value)
+        # per-call transport > bound transport > fail closed (no mock success).
+        transport = self._resolve_transport(http_transport)
+        response = await transport(action=action, principal=principal, secret_value=secret_value)
         return ConnectorResult(ok=bool(response.get("ok", True)), payload=response)

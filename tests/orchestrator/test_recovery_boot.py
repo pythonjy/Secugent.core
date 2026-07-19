@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C8 — boot recovery driver (run_recovery) integration tests.
+"""Boot recovery driver (run_recovery) integration tests.
 
 Covers re-enqueue of resumable runs, FAIL of unsafe (worker-lost) runs, skip of
 terminal runs, run.handover emission, and IDEMPOTENCY (run twice → no duplicate

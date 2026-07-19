@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tool / desktop execution router (Flowchart §11).
+"""Tool / desktop execution router.
 
 Decision order:
 
@@ -263,17 +263,16 @@ class ToolRouter:
 
         if action == "compute":
             # No real compute backend in v0.1 — backend stub for repeatability.
-            # Narrow at the call site: the desktop protocol (secugent.desktop.base)
-            # is an excluded tier in the public core, so execute_step is typed Any.
-            result: builtin.ToolResult = self._require_backend().execute_step(step)
-            return result
+            # The backend type is Any in open-core (secugent.desktop absent);
+            # execute_step's contract returns ToolResult, so assert the boundary type.
+            compute_result: builtin.ToolResult = self._require_backend().execute_step(step)
+            return compute_result
 
         if action == "desktop":
             if not self._config.enable_real_desktop:
-                # Fall back to the virtual desktop sandbox. Narrow at the call site
-                # (excluded desktop tier types execute_step as Any in public core).
-                fallback_result: builtin.ToolResult = self._require_backend().execute_step(step)
-                return fallback_result
+                # Fall back to the virtual desktop sandbox.
+                desktop_result: builtin.ToolResult = self._require_backend().execute_step(step)
+                return desktop_result
             driver = self._config.real_desktop_driver
             if driver is None:
                 raise RealDesktopDisabledError("real desktop enabled but no driver configured")

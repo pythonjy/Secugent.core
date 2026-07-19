@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Read-only public verification API for ``secugent verify`` (BDP Phase 1 item 2).
+"""Read-only public verification API for ``secugent verify``.
 
 Two externally-reproducible trust proofs, exposed as a one-line CLI:
 
@@ -11,12 +11,12 @@ Two externally-reproducible trust proofs, exposed as a one-line CLI:
   ``event_hash`` SHA-256 hash chain integrity, re-using the **existing** audit
   crypto (``secugent.audit.hash_chain`` primitives ``canonical`` /
   ``compute_chain_hash`` / ``GENESIS`` and ``stored_view``). It implements **no
-  new cryptography** (BDP non-scope; §A-2 "표준 준수"). It mirrors
+  new cryptography** (deliberately — standards-compliant reuse only). It mirrors
   :meth:`ChainedEventStore.verify_chain`'s verification semantics exactly:
   prev-hash linkage, event-hash re-derive, underlying-payload cross-check, and
   missing-event detection.
 
-Invariants (see ``docs/specs/2026-06-07-trust-proof-verify.md``):
+Invariants:
 
 * **I1** READ-ONLY — the SQLite store is opened with the ``mode=ro`` URI flag, so
   verification never creates tables, runs migrations, or writes a single byte.
@@ -24,7 +24,7 @@ Invariants (see ``docs/specs/2026-06-07-trust-proof-verify.md``):
   issues ``CREATE TABLE IF NOT EXISTS``). The fixture file is read, never written.
 * **I2** determinism ``ok=True`` iff ``distinct_outputs == 1``.
 * **I3** chain-verify failure ⇒ non-0 exit + explicit first-violation location
-  (no silent pass — §B-8 fail-closed).
+  (no silent pass — fail-closed).
 """
 
 from __future__ import annotations
@@ -32,12 +32,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -59,10 +61,13 @@ from secugent.core.rule_of_two import (
 
 __all__ = [
     "ChainReport",
+    "CheckResult",
     "DeterminismReport",
+    "PreflightReport",
     "VerifyInputError",
     "main",
     "verify_audit_chain",
+    "verify_deploy_preflight",
     "verify_determinism",
 ]
 
@@ -96,6 +101,39 @@ class ChainReport:
     events_checked: int
     first_violation: str | None
     empty: bool
+
+
+Severity = Literal["critical", "high", "medium", "info"]
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """One deploy-config preflight finding.
+
+    ``name`` mirrors exactly one documented deploy-shell blocker so an
+    operator can trace a finding back to the incident it prevents. ``ok`` is
+    ``True`` when the misconfiguration is *absent*; ``message`` states what/why/
+    how-to-fix (Korean, KST allowed — the deployment target is Korean enterprise).
+    """
+
+    name: str
+    severity: Severity
+    ok: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    """Outcome of the read-only ``verify --deploy`` preflight doctor.
+
+    ``ok`` is ``True`` iff every ``critical`` **and** ``high`` check passed —
+    ``info``/``medium`` findings are surfaced but do not fail the report. The
+    ``checks`` tuple is in a fixed, stable order so the report is deterministic
+    (same env → identical report, needed for the 100× determinism proof).
+    """
+
+    ok: bool
+    checks: tuple[CheckResult, ...]
 
 
 # --------------------------------------------------------------------------- #
@@ -345,6 +383,332 @@ def verify_audit_chain(*, tenant_id: str, store_path: Path) -> ChainReport:
 
 
 # --------------------------------------------------------------------------- #
+# Deploy-config preflight doctor — read-only, pure (env in → report out)
+# --------------------------------------------------------------------------- #
+#
+# Each ``_check_*`` mirrors ONE documented deploy-shell blocker. They are
+# **pure**: they read only the passed env snapshot, perform no I/O, and NEVER
+# raise (a check that cannot decide reports a finding). This preserves ``verify``
+# Invariant I1 (read-only) and gives a deterministic report (same env → same
+# report). The misconfig↔blocker mapping lives in each function's docstring.
+
+
+def _truthy(value: str | None) -> bool:
+    """Interpret an env string as a boolean flag (``1/true/yes/on`` → True)."""
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _present(value: str | None) -> bool:
+    """True iff the env value is set and non-blank."""
+    return bool((value or "").strip())
+
+
+def _is_dev(environ: Mapping[str, str]) -> bool:
+    """Re-derive the canonical dev predicate against the *passed* snapshot.
+
+    :func:`secugent.core.env.is_dev_env` reads the live ``os.environ`` directly,
+    so it cannot be used against a ``--env-file``-overlaid snapshot. This mirrors
+    its exact semantics (fail-closed: only an exact, trimmed, case-insensitive
+    ``"dev"`` is dev; unset/blank/anything else is production).
+    """
+    return environ.get("SECUGENT_ENV", "").strip().lower() == "dev"
+
+
+def _check_kms_signer(environ: Mapping[str, str]) -> CheckResult:
+    """Prod boots with the dev HMAC Merkle signer ⇒ boot-crash (critical).
+
+    Mirrors the real prod guard by reusing the canonical :meth:`KmsSettings.from_env`
+    parser (pure — env parsing only, no provider build / no lazy Enterprise
+    import). Fires when ``require_external and provider == 'local'``: production
+    auto-enforces ``require_external`` (or an operator set it), so ``build_kms_provider``
+    would raise ``ValueError`` at boot. We deliberately do NOT call
+    ``build_kms_provider`` (it lazy-imports the Enterprise KMS backends).
+    """
+    name = "kms-signer"
+    try:
+        from secugent.audit.merkle import KmsSettings
+
+        settings = KmsSettings.from_env(environ)
+    except Exception as exc:  # noqa: BLE001 — never raise from a check (P1); degrade to info.
+        return CheckResult(
+            name=name,
+            severity="info",
+            ok=True,
+            message=(
+                f"KMS 설정을 평가할 수 없어 건너뜁니다 (KmsSettings 로드 실패: {exc}). 수동으로 SECUGENT_KMS_* 확인 필요."
+            ),
+        )
+    if settings.require_external and settings.provider == "local":
+        return CheckResult(
+            name=name,
+            severity="critical",
+            ok=False,
+            message=(
+                "프로덕션에서 Merkle 서명자가 dev HMAC(provider=local)로 설정되어 부팅이 즉시 크래시합니다(B5 fail-closed). "
+                "실 KMS를 선택하세요: SECUGENT_KMS_PROVIDER=vault_transit|aws_kms|gcp_kms. "
+                "비-프로덕션 평가 목적이라면 SECUGENT_KMS_ALLOW_DEV_HMAC=1 로만 dev HMAC을 허용하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="critical",
+        ok=True,
+        message=f"KMS 서명자 설정 정상 (provider={settings.provider}, require_external={settings.require_external}).",
+    )
+
+
+def _check_audit_persistence(environ: Mapping[str, str]) -> CheckResult:
+    """Single-node install with no durable audit path ⇒ ephemeral chain (high).
+
+    Heuristic (worded as a warning, not certainty): no ``DATABASE_URL`` (single
+    node) AND ``SECUGENT_DB_PATH`` unset means the append-only chain lands on the
+    ephemeral default (``.secugent/secugent.db``) and is lost on pod restart.
+    """
+    name = "audit-persistence"
+    has_pg = _present(environ.get("DATABASE_URL"))
+    has_db_path = _present(environ.get("SECUGENT_DB_PATH"))
+    if not has_pg and not has_db_path:
+        return CheckResult(
+            name=name,
+            severity="high",
+            ok=False,
+            message=(
+                "단일노드 설치에서 SECUGENT_DB_PATH가 지정되지 않아 감사 해시체인이 휘발성 기본 경로에 기록될 수 있습니다"
+                "(재시작 시 유실 위험). SECUGENT_DB_PATH를 마운트된 볼륨으로 지정하거나 Postgres(DATABASE_URL)를 사용하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="high",
+        ok=True,
+        message="감사 저장 경로 정상 (DATABASE_URL 또는 SECUGENT_DB_PATH 지정됨).",
+    )
+
+
+def _check_ha_audit_fork(environ: Mapping[str, str]) -> CheckResult:
+    """HA enabled without a shared Postgres ⇒ forked audit chain (high).
+
+    HA signal = ``SECUGENT_HA_ENABLED`` truthy OR a replica hint
+    (``SECUGENT_REPLICA_COUNT`` > 1). Without a shared ``DATABASE_URL`` each
+    replica writes its own SQLite chain → the audit chain forks per pod.
+    """
+    name = "ha-audit-fork"
+    replica_raw = environ.get("SECUGENT_REPLICA_COUNT", "").strip()
+    try:
+        replicas = int(replica_raw)
+    except ValueError:
+        replicas = 0
+    ha_signal = _truthy(environ.get("SECUGENT_HA_ENABLED")) or replicas > 1
+    has_pg = _present(environ.get("DATABASE_URL"))
+    if ha_signal and not has_pg:
+        return CheckResult(
+            name=name,
+            severity="high",
+            ok=False,
+            message=(
+                "HA(다중 replica)가 켜져 있으나 공유 Postgres(DATABASE_URL)가 없어 replica마다 감사 체인이 분기(fork)됩니다. "
+                "DATABASE_URL로 공유 PG를 지정하거나 SECUGENT_HA_ENABLED를 끄고 단일노드로 운영하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="high",
+        ok=True,
+        message="HA/감사 체인 정합 정상 (단일노드이거나 공유 PG 구성됨).",
+    )
+
+
+def _check_tool_surface(environ: Mapping[str, str]) -> CheckResult:
+    """No sandbox roots and no allowed domains ⇒ tools disabled (info).
+
+    Both empty means the built-in tool surface is fully closed (the agent does no
+    real file/network tool work). Reported as ``info`` because a locked-down
+    deny-by-default posture may be intentional.
+    """
+    name = "tool-surface"
+    has_roots = _present(environ.get("SECUGENT_SANDBOX_ROOTS"))
+    has_domains = _present(environ.get("SECUGENT_ALLOWED_DOMAINS"))
+    if not has_roots and not has_domains:
+        return CheckResult(
+            name=name,
+            severity="info",
+            ok=False,
+            message=(
+                "SECUGENT_SANDBOX_ROOTS와 SECUGENT_ALLOWED_DOMAINS가 모두 비어 있어 내장 도구가 비활성화됩니다"
+                "(에이전트가 실제 파일/네트워크 작업을 못 함). 의도적 deny-by-default가 아니라면 허용 경로/도메인을 지정하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="info",
+        ok=True,
+        message="내장 도구 표면 활성화됨 (sandbox roots 또는 allowed domains 지정됨).",
+    )
+
+
+def _check_domestic_model(environ: Mapping[str, str]) -> CheckResult:
+    """Sovereign endpoint set but no model id ⇒ 404s all calls (high).
+
+    Fires when ``ANTHROPIC_API_KEY`` unset AND ``SECUGENT_DOMESTIC_MODEL_ENDPOINT``
+    set AND ``SECUGENT_DOMESTIC_MODEL_ID`` unset — the BYO sovereign endpoint has
+    no model selected so every inference call 404s.
+    """
+    name = "domestic-model"
+    has_anthropic = _present(environ.get("ANTHROPIC_API_KEY"))
+    has_endpoint = _present(environ.get("SECUGENT_DOMESTIC_MODEL_ENDPOINT"))
+    has_model_id = _present(environ.get("SECUGENT_DOMESTIC_MODEL_ID"))
+    if not has_anthropic and has_endpoint and not has_model_id:
+        return CheckResult(
+            name=name,
+            severity="high",
+            ok=False,
+            message=(
+                "국산/소버린 모델 엔드포인트(SECUGENT_DOMESTIC_MODEL_ENDPOINT)가 설정됐으나 모델 ID가 없어 모든 추론 호출이 404 됩니다. "
+                "SECUGENT_DOMESTIC_MODEL_ID를 설정하세요(예: exaone-3.5)."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="high",
+        ok=True,
+        message="모델 설정 정상 (ANTHROPIC_API_KEY 또는 국산모델 endpoint+id 구성됨).",
+    )
+
+
+def _check_ldap_tls(environ: Mapping[str, str]) -> CheckResult:
+    """LDAP over plaintext ldap:// without an explicit opt-in (high).
+
+    Fires when ``SECUGENT_AUTH_MODE=ldap`` AND ``SECUGENT_LDAP_URI`` is plaintext
+    ``ldap://`` AND ``SECUGENT_LDAP_ALLOW_INSECURE_TRANSPORT`` is not truthy — the
+    app fails closed at boot; warn early with the fix.
+    """
+    name = "ldap-tls"
+    auth_mode = environ.get("SECUGENT_AUTH_MODE", "").strip().lower()
+    uri = environ.get("SECUGENT_LDAP_URI", "").strip().lower()
+    allow_insecure = _truthy(environ.get("SECUGENT_LDAP_ALLOW_INSECURE_TRANSPORT"))
+    if auth_mode == "ldap" and uri.startswith("ldap://") and not allow_insecure:
+        return CheckResult(
+            name=name,
+            severity="high",
+            ok=False,
+            message=(
+                "LDAP 인증(SECUGENT_AUTH_MODE=ldap)이 평문 ldap:// 로 설정돼 앱이 fail-closed로 거부합니다. "
+                "ldaps:// (TLS)를 사용하거나, 의도적이라면 SECUGENT_LDAP_ALLOW_INSECURE_TRANSPORT=1을 명시적으로 설정하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="high",
+        ok=True,
+        message="LDAP 전송 보안 정상 (ldap 미사용이거나 ldaps:// 또는 명시적 insecure opt-in).",
+    )
+
+
+def _check_egress_bundle(environ: Mapping[str, str]) -> CheckResult:
+    """Egress broker on in prod without a signed policy bundle ⇒ BootPolicyError (high).
+
+    The egress broker is on by default (``SECUGENT_EGRESS_BROKER != '0'``). In
+    production (``SECUGENT_ENV != dev``) it requires a signed policy bundle AND a
+    pinned key id, else boot raises ``BootPolicyError``. Fires when the broker is
+    on, the env is production, and either the bundle path or the key-id pin is
+    missing.
+    """
+    name = "egress-bundle"
+    broker_on = environ.get("SECUGENT_EGRESS_BROKER", "1").strip() != "0"
+    has_bundle = _present(environ.get("SECUGENT_POLICY_BUNDLE_PATH"))
+    has_key_ids = _present(environ.get("SECUGENT_POLICY_ALLOWED_KEY_IDS"))
+    if broker_on and not _is_dev(environ) and not (has_bundle and has_key_ids):
+        return CheckResult(
+            name=name,
+            severity="high",
+            ok=False,
+            message=(
+                "egress 브로커가 켜진 프로덕션인데 서명된 정책 번들 또는 키 ID 핀이 없어 부팅이 BootPolicyError로 거부됩니다. "
+                "번들에 서명·마운트하고(SECUGENT_POLICY_BUNDLE_PATH) 서명 키를 핀(SECUGENT_POLICY_ALLOWED_KEY_IDS)하세요."
+            ),
+        )
+    return CheckResult(
+        name=name,
+        severity="high",
+        ok=True,
+        message="egress 정책 번들 정상 (브로커 off이거나 dev이거나 서명 번들+키 핀 구성됨).",
+    )
+
+
+def verify_deploy_preflight(environ: Mapping[str, str]) -> PreflightReport:
+    """Statically check a resolved runtime env snapshot for deploy misconfigs.
+
+    Pure and read-only: ``environ`` is the only input; no boot, no I/O, no
+    exceptions. Each check mirrors one documented deploy-shell blocker. ``ok`` is
+    ``True`` iff every ``critical`` and ``high`` check passed. The ``checks`` order
+    is fixed so the report is deterministic (same env → identical report).
+    """
+    checks: tuple[CheckResult, ...] = (
+        _check_kms_signer(environ),
+        _check_audit_persistence(environ),
+        _check_ha_audit_fork(environ),
+        _check_tool_surface(environ),
+        _check_domestic_model(environ),
+        _check_ldap_tls(environ),
+        _check_egress_bundle(environ),
+    )
+    ok = all(c.ok for c in checks if c.severity in ("critical", "high"))
+    return PreflightReport(ok=ok, checks=checks)
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a ``KEY=VALUE`` ``.env`` file into a dict (read-only, I1-safe).
+
+    ``#`` comments and blank lines are ignored. A non-blank, non-comment line
+    lacking ``=`` (or with an empty key) is an *operator* error →
+    :class:`VerifyInputError`, as is an unreadable file — so a broken preflight
+    input fails closed with a clear message rather than silently checking nothing.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise VerifyInputError(f"cannot read --env-file {path}: {exc}") from exc
+    parsed: dict[str, str] = {}
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise VerifyInputError(f"--env-file {path} line {lineno} is not KEY=VALUE: {raw!r}")
+        parsed[key] = value.strip()
+    return parsed
+
+
+def _build_deploy_env(env_file: Path | None) -> dict[str, str]:
+    """Resolve the runtime snapshot: ``os.environ`` overlaid with ``--env-file``."""
+    snapshot = dict(os.environ)
+    if env_file is not None:
+        snapshot.update(_parse_env_file(env_file))
+    return snapshot
+
+
+def _emit_preflight(report: PreflightReport) -> None:
+    """Print each preflight finding; route failing critical/high to stderr."""
+    for check in report.checks:
+        status = "OK" if check.ok else "FINDING"
+        to_stderr = (not check.ok) and check.severity in ("critical", "high")
+        _emit(
+            f"verify: deploy [{check.severity}] {check.name}: {status} - {check.message}",
+            stderr=to_stderr,
+        )
+    verdict = "PASS" if report.ok else "FAIL"
+    findings = sum(1 for c in report.checks if not c.ok)
+    _emit(
+        f"verify: deploy preflight {verdict} ({len(report.checks)} checks, {findings} findings)",
+        stderr=not report.ok,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # CLI dispatcher (the ``verify`` subcommand; item 3 adds run/demo)
 # --------------------------------------------------------------------------- #
 
@@ -372,9 +736,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--determinism", action="store_true", help="run the determinism proof")
     parser.add_argument("--chain", action="store_true", help="run the audit hash-chain proof")
+    parser.add_argument(
+        "--deploy",
+        action="store_true",
+        help="run the read-only deploy-config preflight doctor (W6/A1 misconfigs)",
+    )
     parser.add_argument("--tenant", help="tenant id for the chain proof")
     parser.add_argument("--store", type=Path, help="path to the SQLite audit store")
     parser.add_argument("--fixture", type=Path, help="path to the determinism JSON fixture")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        dest="env_file",
+        help="KEY=VALUE .env file overlaid on os.environ for --deploy",
+    )
     parser.add_argument(
         "--samples",
         type=int,
@@ -390,8 +765,13 @@ def _run_verify(args: argparse.Namespace) -> int:
     No flag selected ⇒ run whichever proofs the provided inputs allow (both when
     fully specified). Fail-closed: any failure or input error ⇒ non-0.
     """
-    run_chain = args.chain or (not args.determinism and not args.chain)
-    run_det = args.determinism or (not args.determinism and not args.chain)
+    # "no proof selected" defaults to running determinism + chain (byte-unchanged
+    # legacy behavior). --deploy is opt-in: it composes with the other flags but,
+    # when selected, does NOT trigger the implicit det+chain default.
+    any_selected = args.determinism or args.chain or args.deploy
+    run_chain = args.chain or not any_selected
+    run_det = args.determinism or not any_selected
+    run_deploy = args.deploy
 
     failures = 0
     ran_any = False
@@ -452,6 +832,19 @@ def _run_verify(args: argparse.Namespace) -> int:
                         f"verify: chain FAILED for tenant {creport.tenant_id!r} - {creport.first_violation}",
                         stderr=True,
                     )
+
+    if run_deploy:
+        try:
+            snapshot = _build_deploy_env(args.env_file)
+        except VerifyInputError as exc:
+            _emit(f"verify: deploy input error: {exc}", stderr=True)
+            failures += 1
+        else:
+            ran_any = True
+            preflight = verify_deploy_preflight(snapshot)
+            _emit_preflight(preflight)
+            if not preflight.ok:
+                failures += 1
 
     if not ran_any and failures == 0:
         _emit("verify: nothing to do (no valid inputs provided)", stderr=True)

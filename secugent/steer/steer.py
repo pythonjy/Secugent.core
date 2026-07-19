@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """STEER handler — mid-run human course-correction.
 
-Per Flowchart §8 and master prompt PHASE 6:
+Responsibilities:
 
 * Classify a natural-language directive into one of three structured actions:
   ``add_constraint``, ``patch_goal``, or ``rollback_step``.
@@ -30,6 +30,7 @@ effect — only pre-commit recall (the honest scope).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -48,13 +49,14 @@ __all__ = [
     "SteerHandler",
     "SteerOutcome",
     "SteerClassification",
+    "SteerResumeEvent",
 ]
 
 
 class SteerEventSink(Protocol):
     """Append-only durable sink STEER writes audit events to.
 
-    SECURITY_CONTRACT §10.1 forbids appending audit events outside the sha256
+    Audit events must never be appended outside the sha256
     hash chain. STEER therefore must be wired to ``ChainedEventStore`` in
     production (so every ``steer.*`` event enters ``event_chain`` and links into
     ``prev_hash``), but the bare :class:`~secugent.core.event_store.EventStore`
@@ -88,6 +90,21 @@ class SteerOutcome:
     events: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class SteerResumeEvent:
+    """Structured payload of the second steer.resumed producer.
+
+    Emitted when an actual PAUSED→RUNNING transition occurs (i.e. when
+    resume_from_checkpoint clears the engine pause). Distinguishable from the
+    cosmetic steer.resumed in apply() by the presence of ``from_checkpoint_id``.
+    """
+
+    event_id: str
+    run_id: str
+    from_checkpoint_id: str
+    actor: str
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -110,7 +127,7 @@ class SteerHandler:
         self._model = model or RISK_MODEL_DEFAULT
         self._patch_ttl = patch_ttl_seconds
         self._system_prompt = load_prompt("steer_classifier")
-        # G-H4 (option A): per-run engine registry lookup. With per-run
+        # per-run engine registry lookup. With per-run
         # OversightEngine instances (one per dispatch), a constraint for run R
         # must patch R's *live* engine — not a stale shared one. When the resolver
         # returns ``None`` (run not currently dispatching, or no registry) we fall
@@ -146,12 +163,12 @@ class SteerHandler:
 
         Note: this method does NOT emit ``steer.failed`` — that event is raised
         by the API layer (``POST /steer``) when ``apply()`` itself raises, and is
-        appended to the same hash chain there (SG-20260603-06A).
+        appended to the same hash chain there.
         """
         if not directive or not directive.strip():
             raise ValueError("directive cannot be empty")
 
-        # SG-20260603-05: collect every emitted event_id (in emit order) so the
+        # collect every emitted event_id (in emit order) so the
         # API fan-out can publish exactly these events onto the live bus —
         # independent of the run's accumulated event count.
         emitted: list[str] = []
@@ -179,7 +196,7 @@ class SteerHandler:
 
         if classification.action == "add_constraint":
             outcome.patch = self._build_patch(run_id, classification, directive)
-            # G-H4: route the patch to the *target run's* engine (or the fallback
+            # route the patch to the *target run's* engine (or the fallback
             # when none is registered) so cross-run oversight stays isolated.
             self._resolve_engine(run_id).add_session_patch(outcome.patch)
             emitted.append(
@@ -211,6 +228,57 @@ class SteerHandler:
 
         emitted.append(self._emit(run_id, "steer.resumed", actor, {"action": classification.action}))
         return outcome
+
+    def emit_resume_from_checkpoint(
+        self,
+        *,
+        run_id: str,
+        from_checkpoint_id: str,
+        actor: str,
+        rule_of_two_axes: list[str] | None = None,
+    ) -> SteerResumeEvent:
+        """Emit the SECOND steer.resumed producer.
+
+        This is a structurally distinct producer from the cosmetic steer.resumed
+        in :meth:`apply`. It fires when an actual PAUSED→RUNNING transition occurs
+        — i.e. when :meth:`~secugent.orchestrator.runner.RunOrchestrator.resume_from_checkpoint`
+        clears the engine pause. The payload includes ``from_checkpoint_id`` so
+        consumers can distinguish the two producers:
+
+        - Cosmetic (apply): payload contains ``action``, no ``from_checkpoint_id``.
+        - Structural (this method): payload contains ``from_checkpoint_id``.
+
+        Called by the runner's resume_from_checkpoint path or the API layer,
+        after engine.set_paused(paused=False) and before dispatch.
+        """
+        # use real regulations version from oversight engine
+        _regs_version: str = "0.0.0"
+        try:
+            _regs_version = self._oversight.regulations.version
+        except Exception:  # noqa: BLE001, S110
+            pass
+        payload: dict[str, object] = {
+            "gate": "steer",
+            "decision": "approve",
+            "input_hash": hashlib.sha256(from_checkpoint_id.encode()).hexdigest(),
+            "regulations_version": _regs_version,
+            "rule_of_two_axes": rule_of_two_axes or [],
+            "risk_score": None,
+            "rationale": f"체크포인트 {from_checkpoint_id}에서 재개",
+            "from_checkpoint_id": from_checkpoint_id,
+        }
+        event_id = self._emit(
+            run_id,
+            "steer.resumed",
+            actor,
+            payload,
+        )
+        return SteerResumeEvent(
+            event_id=event_id,
+            run_id=run_id,
+            from_checkpoint_id=from_checkpoint_id,
+            actor=actor,
+        )
 
     # ------------------------------------------------------------------ #
     # Classifier
@@ -391,7 +459,7 @@ class SteerHandler:
     ) -> str:
         """Append an audit event and return its durable ``event_id``.
 
-        SG-20260603-05: the returned id lets :meth:`apply` build an explicit
+        the returned id lets :meth:`apply` build an explicit
         list of emitted events for ID-based bus fan-out (no count-delta window).
         """
         # STEER session-patches carry their own tenant; for plain events we

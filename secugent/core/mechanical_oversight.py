@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic Mechanical Oversight engine.
 
-Per Flowcharts §7 and SECURITY_CONTRACT §8, this module is the **first gate**
+This module is the **first gate**
 every step must pass. It runs *before* RISKANALYZER, applies pattern matching
 against ``REGULATIONS.json``, and raises :class:`HardBlockException` on
 explicit violations so the LLM-based stages can never "score down" a clearly
 forbidden action.
 
-Bypass defenses (master prompt PHASE 1 §3 DoD):
+Bypass defenses:
 
 * ``..`` traversal → resolved before match
 * UNC paths (``\\\\server\\share\\...``) → recognised, matched verbatim
@@ -224,11 +224,11 @@ class OversightEngine:
 
     Evaluation is a pure function of (base regulations, session patches, step):
     same input → same output. The only mutable state is the session-patch list,
-    appended by STEER via :meth:`add_session_patch`. Because G-H4 routes STEER
+    appended by STEER via :meth:`add_session_patch`. Because the per-run wiring routes STEER
     writes to the SAME live per-run engine the SUB workers read, that list is
     accessed concurrently: writes swap it copy-on-write under ``_patches_lock``
     and matcher reads take a lock-free per-evaluation snapshot, so a STEER write
-    is serialised, never tearing an in-flight evaluation (SG-20260606-10).
+    is serialised, never tearing an in-flight evaluation.
     """
 
     def __init__(
@@ -244,14 +244,20 @@ class OversightEngine:
         # take ``_patches_lock`` and swap in a fresh list; readers (SUB workers in
         # the Dispatcher ``ThreadPoolExecutor``) take a lock-free local snapshot of
         # the attribute reference at matcher entry. The attribute rebind is atomic
-        # in CPython, so a concurrent write can never tear an in-flight evaluation
-        # (SG-20260606-10).
+        # in CPython, so a concurrent write can never tear an in-flight evaluation.
         self._patches: list[SessionRegulationPatch] = list(session_patches or [])
         self._patches_lock = threading.Lock()
         # EM-03: signed, compiled egress policy (consumed by the EM-05 broker via
         # ``evaluate_effect``). None ⇒ deny-by-default for the effect surface; the
         # legacy ``evaluate(step)`` path is unaffected either way.
         self._compiled_policy = compiled_policy
+        # STEER 추가: pause 신호 상태 (INV-R6: contextvar 절대 금지 — 명시 전달)
+        # 이 필드는 _patches_lock으로 보호되며 copy-on-write가 아니라 단순 bool/str.
+        # 스레드 경계에서 소실되는 contextvar 방식을 절대 쓰지 않는다.
+        self._pause_active: bool = False
+        self._pause_request_id: str | None = None
+        self._pause_actor: str | None = None
+        self._stop_mode: bool = False  # D-J: mode:stop 전용 플래그
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -261,7 +267,7 @@ class OversightEngine:
     def regulations(self) -> Regulations:
         """The (immutable) base Regulations this engine evaluates against.
 
-        Read-only accessor used by the per-run wiring (G-H4) to stamp the
+        Read-only accessor used by the per-run wiring to stamp the
         effective ``version`` onto audit events without reaching into the
         private ``_regs`` field. Session patches are layered on top at evaluate
         time and are intentionally NOT reflected here.
@@ -275,17 +281,91 @@ class OversightEngine:
         regulations. Used by STEER (PHASE 6).
 
         STEER may call this from a different thread than the SUB workers that are
-        concurrently reading ``_patches`` (G-H4 routes the write to the live
+        concurrently reading ``_patches`` (the per-run wiring routes the write to the live
         per-run engine the workers evaluate against). We therefore build a NEW
         list under ``_patches_lock`` and atomically rebind ``self._patches`` —
         never mutate the existing list in place. The lock only serialises
         concurrent writers (so no two appends lose each other); readers stay
         lock-free and always observe a consistent, length-stable snapshot
-        (SG-20260606-10). Determinism is unaffected — single input still yields a
+        Determinism is unaffected — single input still yields a
         single output; the lock merely orders concurrent writes.
         """
         with self._patches_lock:
             self._patches = [*self._patches, patch]
+
+    # ------------------------------------------------------------------ #
+    # STEER Pause 신호 API (INV-R6 — contextvar 절대 금지)
+    # ------------------------------------------------------------------ #
+
+    def set_paused(
+        self,
+        *,
+        paused: bool,
+        request_id: str,
+        actor: str,
+        stop_mode: bool = False,
+    ) -> bool:
+        """pause 신호를 설정/해제한다 (INV-R6: contextvar 금지).
+
+        R2 멱등: 동일 request_id이면 False 반환 (no-op).
+        첫 설정: True 반환.
+        _patches_lock 보호 — thread-safe.
+
+        Args:
+            paused: True = 정지 신호, False = 해제.
+            request_id: 멱등성 키.
+            actor: 요청 주체.
+            stop_mode: True이면 D-J mode:stop 경로 (재개 불가).
+
+        Returns:
+            True = 상태가 변경됨 (첫 설정),
+            False = 멱등 (동일 request_id로 이미 설정됨).
+        """
+        with self._patches_lock:
+            if paused and self._pause_active and self._pause_request_id == request_id:
+                # R2: 동일 request_id 중복 → 멱등
+                return False
+            self._pause_active = paused
+            if paused:
+                self._pause_request_id = request_id
+                self._pause_actor = actor
+                self._stop_mode = stop_mode
+            else:
+                self._pause_request_id = None
+                self._pause_actor = None
+                self._stop_mode = False
+        return True
+
+    def is_paused(self) -> bool:
+        """현재 pause 신호 여부 (_patches_lock 보호)."""
+        with self._patches_lock:
+            return self._pause_active
+
+    def is_stop_mode(self) -> bool:
+        """D-J: mode:stop 경로 여부 (_patches_lock 보호)."""
+        with self._patches_lock:
+            return self._stop_mode
+
+    def pause_snapshot(self) -> tuple[bool, bool]:
+        """_patches_lock 하에서 두 pause 필드를 원자적으로 읽는다.
+
+        Returns:
+            tuple[is_paused, is_stop_mode]
+        """
+        with self._patches_lock:
+            return self._pause_active, self._stop_mode
+
+    def current_pause_request_id(self) -> str | None:
+        """현재 활성 pause request_id를 순수 read로 반환한다 (BLOCKING-1).
+
+        엔진 상태를 **변경하지 않는** 순수 read-only 프로브다.
+        dedup 판정에서 set_paused(mutate) 대신 이 메서드를 써야 한다.
+
+        Returns:
+            현재 _pause_request_id (pause 신호가 없으면 None).
+        """
+        with self._patches_lock:
+            return self._pause_request_id
 
     def evaluate(self, step: Step) -> OversightResult:
         """Evaluate ``step`` against regulations + session patches.
@@ -370,7 +450,7 @@ class OversightEngine:
         ]
         # Single atomic read of the COW-swapped attribute → consistent, length-
         # stable snapshot for this evaluation even if STEER swaps in a new list
-        # concurrently (SG-20260606-10). Never re-reference ``self._patches`` below.
+        # concurrently. Never re-reference ``self._patches`` below.
         patches = self._patches
         for patch in patches:
             for rule in patch.rules:

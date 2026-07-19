@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 5B / G-C6 — request-path tenant binding (tenant_context).
+"""Request-path tenant binding (tenant_context).
 
 The wired dependency must be an **async** generator so FastAPI runs it in the
 request's own context and the ContextVar set is visible to the async endpoint.

@@ -16,7 +16,7 @@ What it does, in one round:
 2. Runs the key-less demo: a forbidden `file_write` is **HARD BLOCKED** by the
    deterministic Mechanical Oversight engine, then a 3-axis (Rule of Two) step is
    gated through a **step-dedicated HITL approval**.
-3. Writes every decision to an **append-only, hash-chained audit log** (§C-2
+3. Writes every decision to an **append-only, hash-chained audit log** (audit-log
    schema) and prints a summary.
 
 ## Files

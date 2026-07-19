@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Regression: dispatch must enforce action ∈ connector.actions (SG-20260604-02).
+"""Regression: dispatch must enforce action ∈ connector.actions.
 
 The ``Literal → str`` generalisation of ``ConnectorAction.name`` removed the only
 gate that checked "is this action declared by the connector?" on the dispatch
@@ -10,7 +10,7 @@ flowed through ``ConnectorAction.model_validate`` and *executed*, audited as
 
 These tests pin the restored membership gate on **both** the static-Mapping path
 and the live registry-source path (closing either one alone is bypassable), plus
-the SG-20260604-03 audit-consistency follow-ups (malformed/multi-dot actions are
+the audit-consistency follow-ups (malformed/multi-dot actions are
 denied with an audit, and a buggy source surfaces rather than being swallowed).
 
 Deterministic module (§B-4a): unit branches here complement the registry triple
@@ -239,7 +239,7 @@ async def test_undeclared_action_denial_deterministic_100x() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 5. SG-20260604-03 — malformed / multi-dot action audited as denied
+# 5. malformed / multi-dot action audited as denied
 # --------------------------------------------------------------------------- #
 
 
@@ -257,7 +257,7 @@ async def test_multi_dot_action_denied_with_audit() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 6. SG-20260604-03 — a buggy source error is not silently swallowed
+# 6. a buggy source error is not silently swallowed
 # --------------------------------------------------------------------------- #
 
 

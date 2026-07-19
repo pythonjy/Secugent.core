@@ -4,7 +4,7 @@
 EXAONE on-prem serving (e.g. via vLLM / an OpenAI-compatible gateway) speaks the
 OpenAI ``/v1/chat/completions`` schema. This adapter targets that shape so an
 air-gapped EXAONE deployment plugs into SecuGent's :class:`LLMClient`
-abstraction with no core coupling (§A-2.3 model-neutral core).
+abstraction with no core coupling (model-neutral core).
 """
 
 from __future__ import annotations

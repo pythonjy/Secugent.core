@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A2A (Agent-to-Agent) collaboration adapter (P1, §A-3 P1-3).
+"""A2A (Agent-to-Agent) collaboration adapter (P1).
 
 Delegates planning / dispatch to a *remote* A2A agent over HTTP JSON, while
 implementing the orchestrator's existing
@@ -121,7 +121,7 @@ class A2AAgentConfig:
 
 
 # --------------------------------------------------------------------------- #
-# Strict response schemas (system boundary — §B-8)
+# Strict response schemas (system boundary)
 # --------------------------------------------------------------------------- #
 
 
@@ -340,14 +340,14 @@ class A2ADispatcherAdapter:
 
 
 # --------------------------------------------------------------------------- #
-# Real httpx transport (S5)
+# Real httpx transport
 # --------------------------------------------------------------------------- #
 
 
 class A2ASettings(BaseModel):
     """Operator config for the production A2A transport (boot-time).
 
-    ``allow_internal`` is False by default (deny-by-default §A-2.2); set True only
+    ``allow_internal`` is False by default (deny-by-default); set True only
     for a closed-network on-prem peer A2A agent whose endpoint is RFC-1918.
     """
 
@@ -422,7 +422,7 @@ def _import_httpx() -> Any:
 
 
 def build_a2a_transport(settings: A2ASettings) -> HttpxA2ATransport:
-    """Materialise the production A2A transport (S5 wire factory).
+    """Materialise the production A2A transport.
 
     The integration step injects the result into :class:`A2APlannerAdapter` /
     :class:`A2ADispatcherAdapter`; this module never reaches ``api/main.py`` itself.

@@ -182,7 +182,7 @@ def metrics_snapshot() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# G-H8 — emission helpers (single label-contract surface)
+# emission helpers (single label-contract surface)
 #
 # These wrap the three previously-unemitted PHASE 10 counters. They centralise
 # the label contract (so call sites cannot drift) and are *best-effort*: an

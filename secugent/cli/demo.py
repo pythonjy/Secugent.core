@@ -2,7 +2,7 @@
 """Key-less, air-gap-first ``secugent demo``.
 
 Runs one self-contained round of the SecuGent trust loop with **no API key and
-no network** (§A-2.6 폐쇄망 우선):
+no network** (closed-network first):
 
     1. REGULATIONS HARD BLOCK — a Korean banned-path policy deterministically
        blocks a forbidden ``file_write`` via :class:`OversightEngine` (the same
@@ -14,7 +14,7 @@ no network** (§A-2.6 폐쇄망 우선):
        Recorded as an ``approve`` at the ``hitl`` gate.
     3. Audit record — every decision gate is appended to an append-only,
        hash-chained store (:class:`ChainedEventStore`) and surfaced as a
-       :class:`DemoAuditEvent` conforming to the §C-2 schema (``event_id`` /
+       :class:`DemoAuditEvent` conforming to the decision-gate audit schema (``event_id`` /
        ``prev_event_id`` chain, ``rule_of_two_axes``, ``decision`` …).
 
 The demo is **deterministic**: a fixed seed (monotonic event counter + a fixed
@@ -63,8 +63,8 @@ __all__ = [
     "run_demo",
 ]
 
-# The §C-2 decision-gate log schema field set. Kept here so the demo's audit
-# view stays in lock-step with the §C-2 audit schema (a test asserts every field).
+# The decision-gate log schema field set. Kept here so the demo's audit
+# view stays in lock-step with the audit schema (a test asserts every field).
 C2_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "event_id",
@@ -97,9 +97,9 @@ _FIXED_EXPIRY = datetime(2099, 1, 1, 0, 0, 0, tzinfo=_KST)
 
 @dataclass(frozen=True)
 class DemoAuditEvent:
-    """A §C-2-shaped decision-gate audit record (JSON-serialisable, frozen).
+    """A decision-gate audit record (JSON-serialisable, frozen).
 
-    Field-for-field a §C-2 audit log entry. ``prev_event_id`` links each
+    Field-for-field a decision-gate audit log entry. ``prev_event_id`` links each
     event to its predecessor (the genesis event's is ``None``), forming the
     immutable chain that the durable :class:`ChainedEventStore` independently
     hashes — so the human-readable view and the cryptographic chain agree.
@@ -133,7 +133,7 @@ def build_demo_regulations() -> Regulations:
     """A minimal Korean REGULATIONS doc with a HARD BLOCK banned path (C-3).
 
     The banned-path rule id/description are Korean so the demo doubles as a
-    Korean-enterprise fixture (§C-3). Returned via the real loader so the demo
+    Korean-enterprise fixture. Returned via the real loader so the demo
     exercises the same validation path the product uses.
     """
     doc = {
@@ -162,7 +162,7 @@ def build_demo_regulations() -> Regulations:
 
 
 class _DeterministicAuditor:
-    """Builds the §C-2 audit view + the durable hash chain in lock-step.
+    """Builds the decision-gate audit view + the durable hash chain in lock-step.
 
     Each :meth:`record` call appends a durable :class:`Event` to the
     append-only :class:`ChainedEventStore` (so ``verify_chain`` holds) AND emits
@@ -214,7 +214,7 @@ class _DeterministicAuditor:
 
         # Persist the same decision to the append-only hash chain so the audit
         # log is independently verifiable (I2). The durable Event carries the
-        # full §C-2 payload; the chain links them with sha256(prev || body).
+        # full audit payload; the chain links them with sha256(prev || body).
         durable = Event(
             id=event_id,
             tenant_id=_DEMO_TENANT,

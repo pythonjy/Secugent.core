@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Deterministic Rule of Two 3-axis isolation engine (§A-2 architecture rule 1).
+"""Deterministic Rule of Two 3-axis isolation engine (architecture rule 1).
 
-Rule of Two (§A-2.1): in a single task/session, at most **two** of the
+Rule of Two: in a single task/session, at most **two** of the
 following three axes may be active without human review; if all three are needed,
 HITL is **forced**:
 
@@ -17,7 +17,7 @@ upstream consumer (``agents.sub_agent``) generalizes the legacy single-axis
 ``connector_action`` carve-out by calling :func:`classify_axes` and forcing a
 fresh, step-scoped HITL approval whenever :func:`requires_hitl` is true.
 
-The axis string values are wired into the §C-2 audit schema field
+The axis string values are wired into the audit schema field
 ``rule_of_two_axes`` via :func:`axes_to_audit`; they MUST stay byte-for-byte equal
 to that schema (``untrusted_input`` / ``sensitive_access`` / ``external_comm``).
 
@@ -80,9 +80,9 @@ __all__ = [
 
 
 class Axis(StrEnum):
-    """The three Rule of Two axes (§A-2.1).
+    """The three Rule of Two axes.
 
-    String values are the §C-2 audit-schema tokens for ``rule_of_two_axes`` and
+    String values are the audit-schema tokens for ``rule_of_two_axes`` and
     must not be renamed without a coordinated schema change.
     """
 
@@ -264,12 +264,12 @@ def requires_hitl(axes: frozenset[Axis]) -> bool:
 
 
 def axes_to_audit(axes: frozenset[Axis]) -> list[str]:
-    """Sorted, stable list of axis string values for the §C-2 audit payload."""
+    """Sorted, stable list of axis string values for the audit payload."""
     return sorted(axis.value for axis in axes)
 
 
 def axes_for_steps(steps: Iterable[Step]) -> tuple[str, ...]:
-    """Sorted, de-duplicated §C-2 axis tokens for the union of axes over ``steps``.
+    """Sorted, de-duplicated audit axis tokens for the union of axes over ``steps``.
 
     The value :class:`~secugent.core.contracts.ApprovalScope` stamps into
     its immutable ``rule_of_two_axes`` field at approval-creation time. It is the

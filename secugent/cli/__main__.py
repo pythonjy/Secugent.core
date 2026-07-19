@@ -5,7 +5,7 @@ Provides the read-only ``verify`` subcommand plus ``demo`` (key-less,
 air-gap-first demo) and ``run`` (a minimal real agent round on the mock
 client). Dispatch is a thin shim: the first positional token selects the
 subcommand and the remaining argv is handed to that subcommand. Unknown or
-absent subcommands fail closed with exit code 2 (§B-8).
+absent subcommands fail closed with exit code 2.
 
 The HTTP API server is part of the SecuGent Enterprise tier and is not
 included in the open-core distribution. Use the Enterprise package for a
@@ -28,7 +28,7 @@ _USAGE = (
 
 
 def _run_demo_cli(rest: list[str]) -> int:
-    """``secugent demo`` — run the key-less demo and print a §C-2 audit summary."""
+    """``secugent demo`` — run the key-less demo and print a decision-gate audit summary."""
     from secugent.cli.demo import run_demo
 
     result = run_demo()

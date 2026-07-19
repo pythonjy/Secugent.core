@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S2 — LabelResolver: taint + LabelStore 실 라벨 해석 (EM-02 확장).
+"""LabelResolver: taint + LabelStore 실 라벨 해석 (EM-02 확장).
 
 ``EgressBroker.dispatch()``가 사용하는 단일 라벨 결정 경로. 기존 하드코딩
 ``DataLabel.CONFIDENTIAL``을 대체해 다음 두 소스의 **상한(max)** 을 반환한다:

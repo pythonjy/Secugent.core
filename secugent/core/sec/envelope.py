@@ -9,8 +9,7 @@ irreversible budget defaults to 0 (irreversible effects need explicit approval).
 
 ``check`` is pure (no mutation): the caller records usage after a successful,
 gated execution. ``EnvelopeUsage`` only ever increases (monotonic), so cumulative
-usage can never exceed the caps regardless of effect ordering (SECURITY_CONTRACT
-§11 I-B).
+usage can never exceed the caps regardless of effect ordering.
 """
 
 from __future__ import annotations

@@ -11,12 +11,12 @@ Two externally-reproducible trust proofs, exposed as a one-line CLI:
   ``event_hash`` SHA-256 hash chain integrity, re-using the **existing** audit
   crypto (``secugent.audit.hash_chain`` primitives ``canonical`` /
   ``compute_chain_hash`` / ``GENESIS`` and ``stored_view``). It implements **no
-  new cryptography** (BDP non-scope; §A-2 "표준 준수"). It mirrors
+  new cryptography** (deliberately — standards-compliant reuse only). It mirrors
   :meth:`ChainedEventStore.verify_chain`'s verification semantics exactly:
   prev-hash linkage, event-hash re-derive, underlying-payload cross-check, and
   missing-event detection.
 
-Invariants (see ``docs/specs/2026-06-07-trust-proof-verify.md``):
+Invariants:
 
 * **I1** READ-ONLY — the SQLite store is opened with the ``mode=ro`` URI flag, so
   verification never creates tables, runs migrations, or writes a single byte.
@@ -24,7 +24,7 @@ Invariants (see ``docs/specs/2026-06-07-trust-proof-verify.md``):
   issues ``CREATE TABLE IF NOT EXISTS``). The fixture file is read, never written.
 * **I2** determinism ``ok=True`` iff ``distinct_outputs == 1``.
 * **I3** chain-verify failure ⇒ non-0 exit + explicit first-violation location
-  (no silent pass — §B-8 fail-closed).
+  (no silent pass — fail-closed).
 """
 
 from __future__ import annotations
@@ -108,9 +108,9 @@ Severity = Literal["critical", "high", "medium", "info"]
 
 @dataclass(frozen=True)
 class CheckResult:
-    """One deploy-config preflight finding (B1).
+    """One deploy-config preflight finding.
 
-    ``name`` mirrors exactly one documented W6/A1 deploy-shell blocker so an
+    ``name`` mirrors exactly one documented deploy-shell blocker so an
     operator can trace a finding back to the incident it prevents. ``ok`` is
     ``True`` when the misconfiguration is *absent*; ``message`` states what/why/
     how-to-fix (Korean, KST allowed — the deployment target is Korean enterprise).
@@ -124,12 +124,12 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class PreflightReport:
-    """Outcome of the read-only ``verify --deploy`` preflight doctor (B1).
+    """Outcome of the read-only ``verify --deploy`` preflight doctor.
 
     ``ok`` is ``True`` iff every ``critical`` **and** ``high`` check passed —
     ``info``/``medium`` findings are surfaced but do not fail the report. The
     ``checks`` tuple is in a fixed, stable order so the report is deterministic
-    (same env → identical report, needed for the §B-4a 100× determinism proof).
+    (same env → identical report, needed for the 100× determinism proof).
     """
 
     ok: bool
@@ -383,10 +383,10 @@ def verify_audit_chain(*, tenant_id: str, store_path: Path) -> ChainReport:
 
 
 # --------------------------------------------------------------------------- #
-# Deploy-config preflight doctor (B1) — read-only, pure (env in → report out)
+# Deploy-config preflight doctor — read-only, pure (env in → report out)
 # --------------------------------------------------------------------------- #
 #
-# Each ``_check_*`` mirrors ONE documented W6/A1 deploy-shell blocker. They are
+# Each ``_check_*`` mirrors ONE documented deploy-shell blocker. They are
 # **pure**: they read only the passed env snapshot, perform no I/O, and NEVER
 # raise (a check that cannot decide reports a finding). This preserves ``verify``
 # Invariant I1 (read-only) and gives a deterministic report (same env → same
@@ -415,9 +415,9 @@ def _is_dev(environ: Mapping[str, str]) -> bool:
 
 
 def _check_kms_signer(environ: Mapping[str, str]) -> CheckResult:
-    """A1 — prod boots with the dev HMAC Merkle signer ⇒ boot-crash (critical).
+    """Prod boots with the dev HMAC Merkle signer ⇒ boot-crash (critical).
 
-    Mirrors the real B5 guard by reusing the canonical :meth:`KmsSettings.from_env`
+    Mirrors the real prod guard by reusing the canonical :meth:`KmsSettings.from_env`
     parser (pure — env parsing only, no provider build / no lazy Enterprise
     import). Fires when ``require_external and provider == 'local'``: production
     auto-enforces ``require_external`` (or an operator set it), so ``build_kms_provider``
@@ -458,7 +458,7 @@ def _check_kms_signer(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_audit_persistence(environ: Mapping[str, str]) -> CheckResult:
-    """W6-B — single-node install with no durable audit path ⇒ ephemeral chain (high).
+    """Single-node install with no durable audit path ⇒ ephemeral chain (high).
 
     Heuristic (worded as a warning, not certainty): no ``DATABASE_URL`` (single
     node) AND ``SECUGENT_DB_PATH`` unset means the append-only chain lands on the
@@ -486,7 +486,7 @@ def _check_audit_persistence(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_ha_audit_fork(environ: Mapping[str, str]) -> CheckResult:
-    """W6-A — HA enabled without a shared Postgres ⇒ forked audit chain (high).
+    """HA enabled without a shared Postgres ⇒ forked audit chain (high).
 
     HA signal = ``SECUGENT_HA_ENABLED`` truthy OR a replica hint
     (``SECUGENT_REPLICA_COUNT`` > 1). Without a shared ``DATABASE_URL`` each
@@ -519,7 +519,7 @@ def _check_ha_audit_fork(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_tool_surface(environ: Mapping[str, str]) -> CheckResult:
-    """W6-H — no sandbox roots and no allowed domains ⇒ tools disabled (info).
+    """No sandbox roots and no allowed domains ⇒ tools disabled (info).
 
     Both empty means the built-in tool surface is fully closed (the agent does no
     real file/network tool work). Reported as ``info`` because a locked-down
@@ -547,7 +547,7 @@ def _check_tool_surface(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_domestic_model(environ: Mapping[str, str]) -> CheckResult:
-    """W6-LLM — sovereign endpoint set but no model id ⇒ 404s all calls (high).
+    """Sovereign endpoint set but no model id ⇒ 404s all calls (high).
 
     Fires when ``ANTHROPIC_API_KEY`` unset AND ``SECUGENT_DOMESTIC_MODEL_ENDPOINT``
     set AND ``SECUGENT_DOMESTIC_MODEL_ID`` unset — the BYO sovereign endpoint has
@@ -576,7 +576,7 @@ def _check_domestic_model(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_ldap_tls(environ: Mapping[str, str]) -> CheckResult:
-    """W6-F — LDAP over plaintext ldap:// without an explicit opt-in (high).
+    """LDAP over plaintext ldap:// without an explicit opt-in (high).
 
     Fires when ``SECUGENT_AUTH_MODE=ldap`` AND ``SECUGENT_LDAP_URI`` is plaintext
     ``ldap://`` AND ``SECUGENT_LDAP_ALLOW_INSECURE_TRANSPORT`` is not truthy — the
@@ -605,7 +605,7 @@ def _check_ldap_tls(environ: Mapping[str, str]) -> CheckResult:
 
 
 def _check_egress_bundle(environ: Mapping[str, str]) -> CheckResult:
-    """B6 — egress broker on in prod without a signed policy bundle ⇒ BootPolicyError (high).
+    """Egress broker on in prod without a signed policy bundle ⇒ BootPolicyError (high).
 
     The egress broker is on by default (``SECUGENT_EGRESS_BROKER != '0'``). In
     production (``SECUGENT_ENV != dev``) it requires a signed policy bundle AND a
@@ -636,7 +636,7 @@ def _check_egress_bundle(environ: Mapping[str, str]) -> CheckResult:
 
 
 def verify_deploy_preflight(environ: Mapping[str, str]) -> PreflightReport:
-    """Statically check a resolved runtime env snapshot for W6/A1 misconfigs.
+    """Statically check a resolved runtime env snapshot for deploy misconfigs.
 
     Pure and read-only: ``environ`` is the only input; no boot, no I/O, no
     exceptions. Each check mirrors one documented deploy-shell blocker. ``ok`` is

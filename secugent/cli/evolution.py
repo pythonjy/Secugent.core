@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S7 — ``secugent evolution`` operator CLI (EVOLUTION 4-eyes entry point).
+"""``secugent evolution`` operator CLI (EVOLUTION 4-eyes entry point).
 
 Subcommands (all over a durable ``--db`` proposal store):
 
@@ -8,8 +8,8 @@ Subcommands (all over a durable ``--db`` proposal store):
 * ``approve`` — record a 4-eyes admin approval (REUSES ``ProposalRepository`` —
   proposer ≠ approver, role=admin, MFA enforced by the deterministic core).
 * ``open-pr`` — open a GitHub PR **only after 2 DISTINCT admin approvers** have
-  approved (NO AUTO-APPLY, §A-1 / SECURITY_CONTRACT §10.2/§10.6).
-  ``--dry-run`` (the DEFAULT, per §7 "EVOLUTION은 --dry-run 기본") uses
+  approved (NO AUTO-APPLY — an EVOLUTION change is never applied automatically).
+  ``--dry-run`` (the DEFAULT) uses
   :class:`MockGitProvider` and never touches the network.
 
 This CLI re-uses the deterministic 4-eyes state machine wholesale — it adds **no
@@ -234,7 +234,7 @@ def _cmd_open_pr(args: argparse.Namespace) -> int:
             # Token-free by construction; surface the category and fail closed.
             _emit(f"open-pr: PR 생성 실패: {exc}", stderr=True)
             return 1
-        # PR proposal only — no auto commit/tag (§10.6). Record the PR url + merged
+        # PR proposal only — no auto commit/tag. Record the PR url + merged
         # state through the repo state machine.
         try:
             repo.mark_merged(prop.id, pr_url=link.url)

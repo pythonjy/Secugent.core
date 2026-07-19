@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-interface LLM client abstraction.
 
-Per master prompt §1 (technology stack) and §0.7 (모듈 경계 엄수), every LLM
+Every LLM
 call in SecuGent goes through this module. Production uses the Anthropic SDK;
 tests and ``ANTHROPIC_API_KEY``-less environments use the deterministic
 :class:`MockLLMClient`.
@@ -254,7 +254,7 @@ def _to_message_params(
     The public :meth:`LLMClient.generate` contract accepts plain dicts so the
     abstraction stays SDK-agnostic. The Anthropic SDK requires ``role`` to be
     ``"user"`` or ``"assistant"``; any other role is a caller bug, so we fail
-    fast (§B-8) rather than silently coerce.
+    fast rather than silently coerce.
     """
     out: list[MessageParam] = []
     for msg in messages:
@@ -466,7 +466,7 @@ def get_default_client() -> LLMClient:
         # build the real adapter (prod AND dev) so closed-network/sovereign
         # deployments get a real model — never a Mock.
         # The registry is imported lazily here so importing this module never
-        # pulls the concrete adapters (model-neutral core isolation, §A-2.3).
+        # pulls the concrete adapters (model-neutral core isolation).
         domestic_model = os.environ.get("SECUGENT_DOMESTIC_MODEL", "").strip()
         if domestic_model:
             from secugent.core.llm_clients import build_domestic_client

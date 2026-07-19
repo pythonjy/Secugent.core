@@ -67,8 +67,8 @@ class WriterGuard(Protocol):
     """Structural single-writer gate (INV-C1-4).
 
     Declared structurally so this module never imports
-    :class:`secugent.deploy.airgap.HaWriterArbiter` (framework/model-neutral core,
-    §A-2.3; also avoids a deploy→core import cycle). ``assert_writer`` is the
+    :class:`secugent.deploy.airgap.HaWriterArbiter` (framework/model-neutral core;
+    also avoids a deploy→core import cycle). ``assert_writer`` is the
     pure, NON-mutating ownership check: a non-leader raises ``LeaderLostError``
     (``secugent.core.event_store_base``), blocking the write — deny-by-default.
     """
@@ -318,7 +318,7 @@ class PgEventStore:
             await self.assert_leader_lease(worker_id=lease.worker_id, lock_key=lease.lock_key)
 
     async def ensure_schema(self, *, enable_rls: bool = True) -> None:
-        """Create the schema in-process. **Dev-only** (G-H14).
+        """Create the schema in-process. **Dev-only**.
 
         In production the schema is owned by Alembic (``alembic upgrade head``,
         ``migrations/versions/0001_baseline.py``) so that DDL is reviewed,
@@ -944,7 +944,7 @@ class PgEventStore:
             )
 
     # ------------------------------------------------------------------ #
-    # Retention (G-H2) — RLS-aware archive-table pattern. Each call runs in
+    # Retention — RLS-aware archive-table pattern. Each call runs in
     # one transaction that binds ``app.tenant_id`` via ``set_config(..., true)``
     # (SET LOCAL) *and* filters ``WHERE tenant_id`` (defence in depth: RLS +
     # explicit). Archiving COPIES rows into ``events_archive``; purge deletes
@@ -1087,7 +1087,7 @@ async def _noop_within_txn(conn: AsyncConnection) -> None:
 
 
 # ---------------------------------------------------------------------------
-# PgChainedEventStore (G-M8) — hash chain persisted in PG ``event_chain``
+# PgChainedEventStore — hash chain persisted in PG ``event_chain``
 # ---------------------------------------------------------------------------
 
 
@@ -1240,7 +1240,7 @@ class PgChainedEventStore:
         event present in the chain but missing from the store (partial-write gap),
         or an ``events`` row whose canonical form no longer matches the chained
         body (underlying store tamper). The chain table is NOT a second source of
-        truth: the ``events`` table is (SECURITY_CONTRACT §5/§10.1)."""
+        truth: the ``events`` table is."""
         last_hash = GENESIS
         for record, body_canonical in await self._iter_chain_rows(tenant_id=tenant_id):
             expected = compute_chain_hash(last_hash, body_canonical)
@@ -1342,7 +1342,7 @@ class PgChainedEventStore:
     def set_leader_lease(self, lease: LeaderLease | None) -> None:
         self._inner.set_leader_lease(lease)
 
-    # -- Retention (G-H2) — delegate to inner PgEventStore -------------- #
+    # -- Retention — delegate to inner PgEventStore -------------- #
 
     async def archive_day(self, *, tenant_id: str, day: date) -> int:
         return await self._inner.archive_day(tenant_id=tenant_id, day=day)

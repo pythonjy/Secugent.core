@@ -5,7 +5,7 @@ Maps a domestic model selector (``exaone`` | ``hyperclova`` | ``ax`` | ``solar``
 to its concrete adapter class. This module holds **no control decision logic**
 — it is a pure name→constructor dispatch so ``secugent.core`` can obtain a
 sovereign client through the :class:`LLMClient` abstraction without importing
-any concrete adapter directly (§A-2.3 model-neutral core, isolation invariant).
+any concrete adapter directly (model-neutral core, isolation invariant).
 
 The supported selectors are exposed as :data:`DomesticModel` (a ``Literal``) so
 settings can make an unsupported model unrepresentable at the type level.

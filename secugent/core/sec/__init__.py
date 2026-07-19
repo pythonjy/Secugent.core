@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic Effect Mediation core (``secugent.core.sec``).
 
-Pure, side-effect-free primitives shared by every EM unit. See
-``docs/specs/2026-06-02-em-01-effect-primitives.md`` and SECURITY_CONTRACT §11.
+Pure, side-effect-free primitives shared by every EM unit.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ same trust boundary — re-validating it fail-closed against the N2
 :class:`~secugent.core.grounding.Evidence` schema — and seeds the run context
 under ``grounding_evidence`` so the consumer can bind it into ``plan['evidence']``.
 
-SecuGent builds no retrieval engine (§A-1 Non-goal): this module only *moves* an
+SecuGent builds no retrieval engine (a project Non-goal): this module only *moves* an
 already-validated connector result onto the run context. It is a **pure boundary
 primitive** (no I/O, no global state, no wall clock, no mutation): given the same
 inputs it always yields the same dict.

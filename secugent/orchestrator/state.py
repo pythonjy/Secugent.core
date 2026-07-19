@@ -274,8 +274,8 @@ class SQLiteRunStateStore:
     fresh instance against the same path and ``get`` returns the same record).
 
     Concurrency: stdlib :mod:`sqlite3` guarded by an :class:`asyncio.Lock`
-    (no external dependency — see docs/specs/2026-06-03-sqlite-run-state-store.md
-    §동시성). A single event loop serialises all DB access through the lock.
+    (no external dependency). A single event loop serialises all DB access
+    through the lock.
     """
 
     def __init__(self, path: str) -> None:

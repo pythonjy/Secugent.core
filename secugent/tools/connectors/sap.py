@@ -63,7 +63,7 @@ class SapConnector(_RateLimitedConnector):
     actions = ("post_document", "create_purchase_req", "read_document", "search")
 
     async def validate_action(self, action: ConnectorAction, policy: ConnectorPolicy) -> None:
-        # Connector-wide allow-none floor (fail-closed, §A-2.2): an empty company
+        # Connector-wide allow-none floor (fail-closed, deny-by-default): an empty company
         # allowlist HARD-BLOCKS every SAP action — including ``search`` — so the
         # safest/default policy state denies all financial-ERP egress. This mirrors
         # jira.validate_action raising unconditionally when allowed_projects is empty.
@@ -97,7 +97,7 @@ class SapConnector(_RateLimitedConnector):
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("sap connector requires service token via SecretsManager")
-        # S5: per-call transport > bound transport > fail closed (no mock success).
+        # per-call transport > bound transport > fail closed (no mock success).
         transport = self._resolve_transport(http_transport)
         response = await transport(action=action, principal=principal, secret_value=secret_value)
         return ConnectorResult(ok=bool(response.get("ok", True)), payload=response)

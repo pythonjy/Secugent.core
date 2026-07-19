@@ -125,7 +125,7 @@ def resolve_llm_client(settings: LLMSettings) -> LLMClient:
 class TelemetrySettings(BaseModel):
     """Opt-in adoption telemetry settings.
 
-    ``opt_in`` is **False by default** (§A privacy, §A-2.6 closed-network first):
+    ``opt_in`` is **False by default** (privacy-first, closed-network first):
     until an operator explicitly enables it, the collector is a complete no-op.
     The flag feeds :class:`secugent.observability.telemetry.TelemetryCollector`.
     """

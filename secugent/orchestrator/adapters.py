@@ -99,7 +99,7 @@ __all__ = [
 
 SubFactory = Callable[[str, str, "str | None", OversightEngine, str], "SubAgent"]
 """``(actor, plan_approval_id, envelope_hash, oversight, regulations_version)
--> SubAgent`` factory (G-H4 per-run engine threaded explicitly)."""
+-> SubAgent`` factory (per-run engine threaded explicitly)."""
 
 
 class RunEngineRegistry(Protocol):
@@ -259,7 +259,7 @@ class DispatcherAdapter:
         self._dispatcher = dispatcher
         self._approvals = approval_service
         self._sub_factory = sub_factory
-        # G-H4: when a directory-mode loader is wired, every dispatch resolves the
+        # when a directory-mode loader is wired, every dispatch resolves the
         # per-run effective REGULATIONS and builds a fresh per-run engine. When it
         # is ``None`` (file-mode / dev / explicit injection) the boot fallback
         # engine — already fail-closed — is reused byte-for-byte.
@@ -268,10 +268,10 @@ class DispatcherAdapter:
         # Optional STEER registry hook (option A): publish the per-run engine so a
         # ``POST /steer`` for this run reaches THIS engine, not a stale shared one.
         self._run_engines = run_engine_registry
-        # SG-20260621-02: checkpoint store and audit chain for pause handling.
+        # checkpoint store and audit chain for pause handling.
         self._checkpoint_store = checkpoint_store
         self._audit_chain = audit_chain
-        # SG-20260621-20: runner reference for notify_pause_completed callback.
+        # runner reference for notify_pause_completed callback.
         # When set, _handle_pause_result drives the state machine after checkpoint write.
         self._runner: Any = runner
 
@@ -288,7 +288,7 @@ class DispatcherAdapter:
                 f"plan.raw must be a Plan instance, got {type(plan_native).__name__}"
             )
 
-        # G-H4: resolve the per-run effective REGULATIONS and build ONE fresh
+        # resolve the per-run effective REGULATIONS and build ONE fresh
         # engine for this dispatch (shared read-only across its SUB workers).
         # Fail-closed: a load/merge/relaxation error fails the run — never an
         # allow-all fallback (spec §2.2 invariant 1).
@@ -306,7 +306,7 @@ class DispatcherAdapter:
         # step subset; ``None`` ⇒ full plan (legacy behaviour unchanged).
         approval = self._issue_plan_approval(plan_native, envelope, approved_step_ids=approved_step_ids)
 
-        # SG-20260603-01: compute the envelope fingerprint eagerly and thread it
+        # compute the envelope fingerprint eagerly and thread it
         # as an explicit argument. This decouples envelope propagation from the
         # thread execution model (contextvar + copy_context). The bind_envelope
         # binding below is kept as a legacy/compatibility path.
@@ -339,7 +339,7 @@ class DispatcherAdapter:
                 f"dispatcher returned {type(result).__name__}, expected DispatcherResult"
             )
 
-        # SG-20260621-02: if any sub-agent paused, write checkpoint + emit steer.paused.
+        # if any sub-agent paused, write checkpoint + emit steer.paused.
         # We inspect each SubAgentResult directly — DispatcherResult.sub_results is
         # {actor: SubAgentResult}. A pause on any sub is propagated.
         for _actor, sub_result in result.sub_results.items():
@@ -350,7 +350,7 @@ class DispatcherAdapter:
         return _result_to_dict(result)
 
     # ------------------------------------------------------------------ #
-    # Pause handling (SG-20260621-02)
+    # Pause handling
     # ------------------------------------------------------------------ #
 
     async def _handle_pause_result(self, run_id: str, sub_result: Any) -> None:
@@ -393,7 +393,7 @@ class DispatcherAdapter:
         except Exception:
             _logger.exception("checkpoint write failed for run %s; emitting steer.failed", run_id)
             # E4: write failure → emit steer.failed, keep run RUNNING (not aborted).
-            # SG-20260621-23b: §C-2 필수 필드 추가 (decision, input_hash,
+            # 필수 감사 필드 추가 (decision, input_hash,
             # regulations_version, rule_of_two_axes, risk_score, actor dict).
             if self._audit_chain is not None:
                 _error_key = "checkpoint_write_failed"
@@ -418,7 +418,7 @@ class DispatcherAdapter:
                 self._audit_chain.append_event(failed_ev)
             return
 
-        # SG-20260621-20: Drive state machine INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED
+        # Drive state machine INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED
         # after durable checkpoint write succeeds (before steer.paused broadcast).
         # Use getattr to remain compatible with __new__-created instances in tests
         # that pre-date the runner parameter.
@@ -427,7 +427,7 @@ class DispatcherAdapter:
             _runner.notify_pause_completed(run_id)
 
         # Durable-before-broadcast: checkpoint committed — now emit steer.paused.
-        # SG-20260621-23b NEW-2: actor도 §C-2 구조화 dict로 payload에 포함한다.
+        # actor도 구조화 dict로 payload에 포함한다.
         if self._audit_chain is not None:
             paused_ev = Event(
                 tenant_id=TenantId(checkpoint.tenant_id),
@@ -461,7 +461,7 @@ class DispatcherAdapter:
     # ------------------------------------------------------------------ #
 
     def _resolve_per_run_engine(self, run_id: str, plan: Plan) -> tuple[OversightEngine, str]:
-        """Resolve the per-run :class:`OversightEngine` + effective version (G-H4).
+        """Resolve the per-run :class:`OversightEngine` + effective version.
 
         * No loader (file-mode / dev / explicit injection) → reuse the boot
           fallback engine and its version verbatim (byte-for-byte unchanged path,
@@ -472,7 +472,7 @@ class DispatcherAdapter:
         * A corrupt/relaxing policy raises ``RegulationsLoadError`` /
           ``RegulationsSchemaError`` → surfaced as ``DispatcherResultMalformed`` so
           the run FAILS. We never fall back to allow-all or bare base on error
-          (fail-closed, spec §2.2 / SECURITY_CONTRACT §2.1).
+          (fail-closed).
         """
         if self._regulations_loader is None:
             return self._fallback_engine, self._fallback_engine.regulations.version

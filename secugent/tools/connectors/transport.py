@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S5 — real httpx egress transport for the first-party connectors.
+"""Real httpx egress transport for the first-party connectors.
 
 Each connector's ``execute`` receives an injectable ``http_transport`` callable
-``(action, principal, secret_value) -> dict``. Before S5 that callable was always
+``(action, principal, secret_value) -> dict``. Previously that callable was always
 ``None`` in production and the connector fell back to a mock-success — a
 false-green. This module supplies the REAL callable:
 
@@ -181,7 +181,7 @@ def _default_mapper(action: ConnectorAction) -> _Mapped:
     """Generic mapper used by every first-party connector.
 
     The first-party vendors differ in exact REST shape; rather than encode each
-    vendor's API surface (out of scope for S5, which is about *wiring* a real
+    vendor's API surface (out of scope here, which is about *wiring* a real
     transport — not modelling six SaaS APIs), every action POSTs to
     ``/{action_name}`` with the action params as the JSON body. The action name
     is already gated by the connector's ``actions`` tuple + the broker membership
@@ -215,7 +215,7 @@ class ConnectorSettings(BaseModel):
     """Operator config for the production connector transport (boot-time).
 
     ``endpoints`` maps a connector name to its vendor base URL. ``allow_internal``
-    is False by default (deny-by-default §A-2.2); set True only for closed-network
+    is False by default (deny-by-default); set True only for closed-network
     on-prem connectors (사내 메신저·ERP·ITSM) whose endpoints are RFC-1918.
     """
 
@@ -368,7 +368,7 @@ def build_connector_transport(settings: ConnectorSettings, *, connector_name: st
 
     The integration step calls this per connector (``connector_name``) and injects
     the result into ``ConnectorTransport.dispatch(..., http_transport=...)`` — this
-    module never reaches ``api/main.py`` itself (S5 lane boundary).
+    module never reaches ``api/main.py`` itself (lane boundary).
     """
     endpoints = {name: ConnectorEndpoint(base_url=url) for name, url in settings.endpoints.items()}
     return HttpxConnectorTransport(

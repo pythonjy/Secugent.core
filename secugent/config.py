@@ -53,9 +53,9 @@ _TRUTHY_ENV_TOKENS: frozenset[str] = frozenset({"1", "true", "yes"})
 def _default_ha_enabled() -> bool:
     """Resolve HA (multi-replica) mode from ``SECUGENT_HA_ENABLED``.
 
-    W6 BLOCKER A: this is the SINGLE source of truth for ``ha_enabled``. The field
+    This is the SINGLE source of truth for ``ha_enabled``. The field
     was previously a bare ``False`` default with no env reader, so create_app's
-    ``config or SecuGentConfig()`` boot never activated the B2 single-writer guard
+    ``config or SecuGentConfig()`` boot never activated the single-writer guard
     (``_assert_ha_single_writer_safe``) — a shipped container running HA on per-pod
     SQLite would silently fork the audit chain. Deny-by-default: only the explicit
     truthy tokens (1/true/yes, case-insensitive) enable HA; unset/blank/unknown →
@@ -91,9 +91,9 @@ class OrchestratorConfig:
     # dev-only (it cannot guarantee a single leader across nodes); ``"pg"``
     # requires a PG event store exposing the lease primitives.
     #
-    # W6 BLOCKER A: read from ``SECUGENT_HA_ENABLED`` at construction (via
+    # read from ``SECUGENT_HA_ENABLED`` at construction (via
     # :func:`_default_ha_enabled`) so create_app's ``config or SecuGentConfig()``
-    # default reflects the operator's HA choice and the B2 single-writer boot guard
+    # default reflects the operator's HA choice and the single-writer boot guard
     # becomes reachable. An explicit ``OrchestratorConfig(ha_enabled=…)`` still
     # overrides the env (callers/tests keep full control).
     ha_enabled: bool = field(default_factory=_default_ha_enabled)
@@ -124,7 +124,7 @@ class DockerBackendConfig:
     cpu_limit: float = 1.0
     mount_paths: list[MountSpec] = field(default_factory=list)
     read_only_root: bool = True
-    # The sandbox_roots cross-check (master prompt 3.5) — orchestrator
+    # The sandbox_roots cross-check — orchestrator
     # populates this from the workspace's sandbox configuration. Empty means
     # "no rw mounts allowed".
     sandbox_roots: list[str] = field(default_factory=list)

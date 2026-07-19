@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """STEER 인터럽트 상태기계.
 
-§3 D-A 결정: umbrella RunState는 항상 EXECUTING을 유지한다.
+설계 결정: umbrella RunState는 항상 EXECUTING을 유지한다.
 interrupt_state는 RunRecord에 additive 필드로 붙는 별도 enum이다.
 
-§4 상태 전이 (합법 전이만 허용; 그 외는 InterruptStateError — INV-SM-1):
+상태 전이 (합법 전이만 허용; 그 외는 InterruptStateError — INV-SM-1):
 
   RUNNING → INTERRUPT_REQUESTED → PAUSING → PAUSED_SNAPSHOTTED → RESUMING → RUNNING
                                            → REINSTRUCTING

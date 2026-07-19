@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Built-in tools for SUB execution.
 
-Per master prompt PHASE 3 DoD:
+Guarantees:
 
 * ``file_write`` is **only** allowed to write under a configured sandbox root.
 * ``http_get`` must honour the active :class:`DomainPolicy` and refuse to
@@ -189,7 +189,7 @@ def http_get(
         raise BuiltinToolError(f"url normalisation failed: {exc}") from exc
 
     parsed = urlsplit(url if "://" in url else f"http://{url}")
-    # B6 / §A-2.2 deny-by-default: an ABSENT allowlist must DENY, not fetch-any.
+    # deny-by-default: an ABSENT allowlist must DENY, not fetch-any.
     # The legacy code skipped the check when ``allowed_domains is None`` — a
     # fail-OPEN path reachable only with the egress broker disabled
     # (``SECUGENT_EGRESS_BROKER=0``), but still a hole. Refuse fail-closed.

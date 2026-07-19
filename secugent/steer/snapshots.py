@@ -58,7 +58,7 @@ class SnapshotRef:
 
 @dataclass
 class RunCheckpoint:
-    """런 일시정지 시 캡처되는 컨텍스트 스냅샷 (§6 내용).
+    """런 일시정지 시 캡처되는 컨텍스트 스냅샷.
 
     D-E: patch_remaining_ttl — 동결된 잔여 TTL(초). expires_at 절대값 불가.
     D-H: completed_step_ids는 advisory(감사체인이 권위 소스).
@@ -88,7 +88,7 @@ class RunCheckpoint:
     created_at: str
     """ISO8601 UTC 타임스탬프 (비결정 필드 — 해시 body 제외)."""
     actor: str
-    """정지를 요청한 액터 (§9.1)."""
+    """정지를 요청한 액터."""
 
 
 # ---------------------------------------------------------------------------

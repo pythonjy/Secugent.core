@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structured logging with redaction for SecuGent.
 
-Per SECURITY_CONTRACT §6 the logger MUST redact API keys, bearer tokens,
+The logger MUST redact API keys, bearer tokens,
 emails, KR resident numbers, large file bodies and large base64 blobs before
 they reach the JSONL log file or the durable SQLite event store.
 """

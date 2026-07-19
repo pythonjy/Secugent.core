@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """HEAD planner agent — produces approved Plans for the Dispatcher.
 
-Per Flowchart §4 and master prompt PHASE 4:
+Responsibilities:
 
 * Decompose the goal, consult REGULATIONS, draft steps, **enumerate risks**.
 * The output schema is :class:`secugent.core.contracts.Plan`.
@@ -213,18 +213,18 @@ class HeadAgent:
         # step-scoped HITL approval. Surface a domain-meaningful error here (like
         # the 'unknown' guard above) instead of letting ApprovalScope's validator
         # explode as a raw pydantic ValidationError. This is a defense-in-depth
-        # layer only: the core's _enforce_scope (SG-20260604-04) remains the final
+        # layer only: the core's _enforce_scope remains the final
         # line that authorizes connector_action solely via a step-dedicated scope.
         if "connector_action" in action_types:
             raise ValueError(
                 "plan contains 'connector_action' — Rule of Two axis ③, "
                 "must hit step-scoped HITL (cannot be pre-approved at plan level)"
             )
-        # Generalize the connector_action guard to the full Rule of Two
-        # (§A-2.1). Any approved step that trips all three axes (untrusted input +
+        # Generalize the connector_action guard to the full Rule of Two.
+        # Any approved step that trips all three axes (untrusted input +
         # sensitive access + external comm) can never be pre-approved at the plan
         # level — it must pass a fresh, step-scoped HITL. Surface a domain error
-        # here (defense in depth); the core ``_enforce_scope`` (SG-20260604-04)
+        # here (defense in depth); the core ``_enforce_scope``
         # remains the final authority that authorizes such a step only via a
         # step-dedicated scope.
         # Axis ① (untrusted_input) is auto-derived from a ``provenance`` block (see
@@ -254,7 +254,7 @@ class HeadAgent:
             # EM-08: bind the approval to the minimal envelope the run will run
             # inside; the SubAgent re-verifies this hash on consume.
             envelope_hash=envelope_hash,
-            # Stamp the Rule of Two axes (§C-2 rule_of_two_axes) the
+            # Stamp the Rule of Two axes (the audit ``rule_of_two_axes`` field) the
             # approved steps collectively trip, computed deterministically over the
             # union of their provenance-aware classifications. Frozen at issuance —
             # the HITL approve/reject emitters read this back verbatim so the audit
@@ -345,7 +345,7 @@ class HeadAgent:
     def mark_derived_from(child: Step, parent: Step) -> Step:
         """Return a copy of ``child`` that inherits ``parent``'s resolved taint.
 
-        This is the **propagation producer** for axis ① (§A-2.1): when
+        This is the **propagation producer** for Rule of Two axis ①: when
         a plan step's input is *derived from* a prior step's output, the child must
         carry the parent's taint forward. The parent's resolved taint is computed
         via the single core classifier (:meth:`RuleOfTwoContext.from_step`) — so an
@@ -382,7 +382,7 @@ class HeadAgent:
         property swallows engine errors and falls back to ``"0.0.0"``), so this
         never fabricates a version — and if a custom provider were to raise, the
         exception propagates and the plan fails closed rather than shipping a Plan
-        with bogus provenance (§B-8 fail-fast).
+        with bogus provenance (fail-fast).
         """
         if self._regulations_version_provider is None:
             return "0.0.0"
@@ -403,7 +403,7 @@ class HeadAgent:
                 "Multiple HEAD entries are grouping hints only; this run still has one planner."
             ),
         }
-        # SG-20260602-03: agent_specs/head_specs (incl. operator-editable role and
+        # agent_specs/head_specs (incl. operator-editable role and
         # description strings) are DATA, not trusted planner instructions — fence
         # them the same way as the goal so a malicious topology config cannot inject
         # planner directives.

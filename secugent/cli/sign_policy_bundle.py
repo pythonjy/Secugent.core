@@ -8,7 +8,7 @@ Operators were stuck: prod compose could not boot. This subcommand closes that
 gap by driving the exact 4-eyes/MFA sign-off gate the HTTP ``/policy/sign`` route
 uses, but offline (air-gap-first) — no running server, no audit store.
 
-Trust model (deterministic module, §B-4a):
+Trust model (deterministic module):
 
 * The signing gate is :func:`secugent.core.sec.policy.authoring.sign_off` — NEVER
   ``sign_bundle`` directly. ``sign_off`` refuses unless the approver is an
@@ -16,7 +16,7 @@ Trust model (deterministic module, §B-4a):
   behaviour (the operator approves *behaviour*, not JSON).
 * Signing material comes from :func:`secugent.audit.merkle.build_kms_provider`
   (HMAC in dev / prod-mirror, external KMS in prod) — no hand-rolled crypto. The
-  B5 prod guard makes ``SECUGENT_ENV=production`` refuse the dev HMAC key
+  The prod guard makes ``SECUGENT_ENV=production`` refuse the dev HMAC key
   (fail-closed) unless ``SECUGENT_KMS_ALLOW_DEV_HMAC=1`` (prod-mirror smoke tests).
 * This CLI is an OFFLINE admin tool: ``role=admin`` is asserted by tool
   invocation, MFA/4-eyes is affirmed via ``--approver-mfa`` (default on), and the
@@ -56,7 +56,7 @@ _PROG = "secugent sign-policy-bundle"
 
 # --------------------------------------------------------------------------- #
 # Boundary input models (mirror the /policy/sign route's EffectIn/FixtureIn) —
-# validated with extra="forbid" so a typo'd key fails closed (§B-8).
+# validated with extra="forbid" so a typo'd key fails closed.
 # --------------------------------------------------------------------------- #
 
 
@@ -92,7 +92,7 @@ class _FixtureIn(BaseModel):
     @classmethod
     def _coerce_label(cls, value: object) -> object:
         """Accept a ``DataLabel`` member NAME ("CONFIDENTIAL", case-insensitive) as
-        well as its integer value — operators hand-author fixtures (§C-3), and a
+        well as its integer value — operators hand-author fixtures, and a
         readable name is far less error-prone than a bare ``2``."""
         if isinstance(value, str):
             stripped = value.strip()
@@ -137,9 +137,9 @@ def _build_signing_kms(key_id: str, environ: Mapping[str, str] | None) -> KmsPro
     """Build the signing provider from the KMS env, pinning ``key_id``.
 
     Reuses :func:`build_kms_provider` (the Merkle signer factory) so the policy
-    signer never hand-rolls crypto (§D-2). Overriding ``key_id`` makes the local
+    signer never hand-rolls crypto. Overriding ``key_id`` makes the local
     (dev / prod-mirror) provider register the policy signing key; external
-    providers pass it at sign time. The B5 prod guard raises ``ValueError`` when
+    providers pass it at sign time. The prod guard raises ``ValueError`` when
     ``SECUGENT_ENV=production`` selects ``provider=local`` without the documented
     ``SECUGENT_KMS_ALLOW_DEV_HMAC`` escape hatch (fail-closed).
     """

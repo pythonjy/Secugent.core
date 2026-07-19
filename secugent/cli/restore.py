@@ -3,7 +3,7 @@
 
 Restoring the append-only audit store is a trust-critical operation: a restore
 that silently accepts a tamper-broken database would destroy the very
-tamper-evidence the hash chain exists to provide (§C-1 / §C-2). This command
+tamper-evidence the hash chain exists to provide. This command
 therefore *re-verifies the hash chain of the candidate database before it is
 applied* and refuses (non-zero, live store untouched) on any break, truncation,
 or divergence — ``--force`` relaxes only the "overwrite the existing store"

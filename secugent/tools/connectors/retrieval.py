@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Read-only retrieval (source-search) connector (P2, §A-3 P2-4).
+"""Read-only retrieval (source-search) connector (P2).
 
 Wraps an *external* RAG/search endpoint (사내 데이터팀 파이프라인·벡터DB 게이트웨이·
 Glean류) in the existing :class:`~secugent.tools.connectors.base.Connector`
 contract. SecuGent does **not** implement retrieval, ranking, or re-ranking
-(§A-1 Non-goal — no vector DB, no embeddings, no chunking); this connector only
+(a project Non-goal — no vector DB, no embeddings, no chunking); this connector only
 *admits* an external search result across the trust boundary, forcing every hit
 through the fail-closed :class:`~secugent.core.grounding.Evidence` schema so a
 result with no traceable source is rejected rather than trusted. No accuracy claim
@@ -116,7 +116,7 @@ class RetrievalConnector(_RateLimitedConnector):
     ) -> Any:
         # Convert any transport failure (timeout/network/vendor error) into a
         # domain ConnectorError carrying a generic message — the credential and the
-        # raw vendor text must never leak through an error path (§B-8). A
+        # raw vendor text must never leak through an error path. A
         # ConnectorError raised by the transport itself keeps its concrete type
         # (e.g. a nested WhitelistViolation stays a policy denial).
         try:

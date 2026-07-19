@@ -49,7 +49,7 @@ class WhitelistViolation(ConnectorError):
 
 
 class ConnectorTransportUnavailable(ConnectorError):
-    """No HTTP transport was injected into ``execute`` (fail-closed, S5).
+    """No HTTP transport was injected into ``execute`` (fail-closed).
 
     Connectors used to fall back to ``{mock: True}`` success when
     ``http_transport`` was ``None`` — a false-green that returned success
@@ -57,7 +57,7 @@ class ConnectorTransportUnavailable(ConnectorError):
     error (the production wiring did not inject the real transport), distinct
     from a :class:`WhitelistViolation` (a policy decision). Raising this — never
     returning a mock success — makes a misconfigured deployment fail closed
-    instead of silently no-op'ing every write (§A-2.2 deny-by-default, §B-8
+    instead of silently no-op'ing every write (deny-by-default,
     fail-fast). The qualified type lets the broker audit the deny reason without
     confusing it with a policy violation.
     """
@@ -160,7 +160,7 @@ class _RateLimitedConnector:
     The four PHASE-11 connectors (slack/notion/jira + base) each carried an
     identical ``_take_rate_token`` body. Rather than copy it a fifth/sixth/seventh
     time for the extended connectors (groupware/SAP/docs), they inherit this
-    mixin (§B-6: extract on the 3rd repetition). It is intentionally NOT retrofitted
+    mixin (extract on the 3rd repetition). It is intentionally NOT retrofitted
     onto the existing connectors here — that would be an unrelated refactor of code
     outside this item's scope — so behaviour is byte-identical to ``slack.py``.
 
@@ -168,7 +168,7 @@ class _RateLimitedConnector:
     side-effect-free because the transport calls it twice (pre-credential gate +
     re-check inside ``execute``).
 
-    S5: an optional ``http_transport`` may be bound at construction. ``execute``
+    An optional ``http_transport`` may be bound at construction. ``execute``
     uses the per-call transport when one is passed, else this bound default, else
     fails closed (:class:`ConnectorTransportUnavailable`). Binding lets the
     SubAgent → broker → connector path (which calls ``router.dispatch(step)`` with
@@ -182,7 +182,7 @@ class _RateLimitedConnector:
         self._bound_transport = http_transport
 
     def _resolve_transport(self, http_transport: Any | None) -> Any:
-        """Per-call transport > bound transport > fail closed (S5, INV-1/3)."""
+        """Per-call transport > bound transport > fail closed (INV-1/3)."""
         transport = http_transport if http_transport is not None else self._bound_transport
         if transport is None:
             raise ConnectorTransportUnavailable(f"{self.name} connector has no transport configured")

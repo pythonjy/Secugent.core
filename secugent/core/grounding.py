@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """RAG boundary contract: Evidence schema + grounding enforcement (N2, 갭 ②③).
 
-SecuGent does **not** build a RAG engine (§A-1 Non-goal — no vector DB, no
+SecuGent does **not** build a RAG engine (a project Non-goal — no vector DB, no
 GraphRAG, no embeddings, no chunking, no re-ranking). It owns only the *boundary
 contract* by which an external RAG/search result is admitted:
 
@@ -14,13 +14,13 @@ contract* by which an external RAG/search result is admitted:
    any step grounded on external evidence trips Rule of Two axis① (INV-G4).
 3. **Grounding enforcement** — a high-impact (HIGH/CRITICAL) decision cannot
    proceed without at least one :class:`Evidence` (deny-by-default, INV-G1). This
-   is the deterministic core of §C-1 "고영향 의사결정에 설명(근거) 첨부".
+   is the deterministic core of the "고영향 의사결정에 설명(근거) 첨부" requirement.
 
 This is a **pure leaf module**, held to the same discipline as
 :mod:`secugent.core.provenance`: every function is a referentially-transparent
 function of its arguments — no I/O, no global state, no mutation, no wall clock,
 no randomness. Given the same inputs it always yields the same verdict
-(INV-G2), which is why it qualifies for the §B-4a deterministic test regime.
+(INV-G2), which is why it qualifies for the deterministic test regime.
 
 :class:`ImpactLevel` string values are kept byte-for-byte equal to the
 ``Risk.severity`` ``Literal`` in :mod:`secugent.core.contracts`
@@ -48,7 +48,7 @@ __all__ = [
     "taint_for_evidence",
 ]
 
-# The Rule of Two HITL boundary is 3 active axes (§A-2.1) — the same constant
+# The Rule of Two HITL boundary is 3 active axes — the same constant
 # ``rule_of_two.requires_hitl`` uses. Kept as a local literal so this stays a pure
 # leaf (no import of ``rule_of_two``); the caller passes the axis COUNT, so the two
 # never share a type, only this semantic boundary (INV-B1).
@@ -127,7 +127,7 @@ def is_high_impact(level: ImpactLevel) -> bool:
 def impact_from_axes(active_axis_count: int) -> ImpactLevel:
     """Map the number of active Rule of Two axes to an :class:`ImpactLevel`.
 
-    A decision that trips **all three** Rule of Two axes (§A-2.1) is, by
+    A decision that trips **all three** Rule of Two axes is, by
     definition, at the HITL-forcing maximum — the same boundary
     :func:`secugent.core.rule_of_two.requires_hitl` enforces — so it is
     high-impact (:attr:`ImpactLevel.CRITICAL`). Fewer than three axes contributes

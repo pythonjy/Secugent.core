@@ -53,7 +53,7 @@ class PolicyLike(Protocol):
     """Structural interface for the broker's policy evaluator (EM-03).
 
     Both :class:`~secugent.core.sec.policy.CompiledPolicy` (direct) and the
-    :class:`OversightEngineShim` (SG-20260623-02, routes through
+    :class:`OversightEngineShim` (routes through
     ``OversightEngine.evaluate_effect``) satisfy this Protocol so the broker
     never needs to import the concrete engine class (avoiding a core→io cycle).
     """
@@ -186,12 +186,12 @@ class EgressBroker:
         self._audit = audit_store
         self._transport = transport
         self._max_external = max_external
-        # EM-02 / SG-20260623-01: LabelResolver resolves the effective egress
+        # EM-02: LabelResolver resolves the effective egress
         # label per dispatch call (taint + LabelStore upper-bound). When None
         # the broker falls back to ``_default_label`` (backward-compatible).
         self._label_resolver = label_resolver
         self._envelope_gate = envelope_gate
-        # G-H15 (SG-20260624-01): EnvelopeReviewGate drives the SUSPEND → HITL →
+        # EnvelopeReviewGate drives the SUSPEND → HITL →
         # RESUME/ABORT state machine. An envelope "suspend" verdict calls
         # on_suspend() instead of converting directly to a deny.
         #
@@ -254,7 +254,7 @@ class EgressBroker:
         pre-run read path (:meth:`dispatch_connector_read`): that gate presupposes a
         bound run envelope, which does not exist before a run dispatches, so it would
         deny-by-default. Every other control — profile, EM-03 signed policy,
-        §A-2.1 Rule-of-Two, EM-02 egress-label cap, EM-09 staging, audit-before-act —
+        Rule-of-Two, EM-02 egress-label cap, EM-09 staging, audit-before-act —
         still runs, so the relaxation is bounded (no run-scoped authorization), never
         an ungated bypass.
         """
@@ -287,10 +287,10 @@ class EgressBroker:
                 except Exception as exc:  # noqa: BLE001 - telemetry is non-fatal to the deny result
                     _log.warning("unscoped telemetry record failed (non-fatal): %s", exc)
             return self._deny(req, decision), None
-        # 2.5. Rule-of-Two 3-axis gate (SG-20260623-03, §A-2.1).
+        # 2.5. Rule-of-Two 3-axis gate.
         # When all three axes are simultaneously true the effect requires HITL;
-        # executing it without human approval violates the Rule of Two
-        # (SECURITY_CONTRACT §7). This gate runs AFTER policy allow so a
+        # executing it without human approval violates the Rule of Two.
+        # This gate runs AFTER policy allow so a
         # permissive policy does NOT bypass the structural constraint — the two
         # controls are independent layers. HITL wiring is a follow-on; today
         # the deny is unconditional (no HITL bypass path exists yet) to match
@@ -343,7 +343,7 @@ class EgressBroker:
         if not skip_envelope and self._envelope_gate is not None:
             verdict = self._envelope_gate.check(req)
             if verdict.outcome != "allow":
-                # G-H15: route through the per-(tenant, run) EnvelopeReviewGate
+                # route through the per-(tenant, run) EnvelopeReviewGate
                 # when wired so the SUSPEND → HITL → RESUME/ABORT state machine is
                 # driven rather than a plain deny. Audit the HITL-pending event
                 # before returning (append-before-transport, I-A).
@@ -357,7 +357,7 @@ class EgressBroker:
                         )
                     except Exception as exc:  # noqa: BLE001 - gate state error → fail-closed deny
                         _log.warning("EnvelopeReviewGate.on_suspend failed: %s", exc)
-                    # Emit §C-2 HITL-pending audit event into the hash chain.
+                    # Emit the HITL-pending audit event into the hash chain.
                     hitl_event = Event(
                         tenant_id=req.principal.tenant_id,
                         actor=self._actor,
@@ -455,12 +455,12 @@ class EgressBroker:
         )
 
     def _rule_of_two_axes(self, effect: Effect) -> dict[str, bool]:
-        """Classify the three Rule-of-Two axes for ``effect`` (§A-2.1).
+        """Classify the three Rule-of-Two axes for ``effect``.
 
         Returns a mapping with three boolean entries:
           - ``external_comm``: the effect targets an EXTERNAL sink.
           - ``sensitive_access``: the effect kind touches files, network, or
-            connector actions (write-class kinds, §A-2.1).
+            connector actions (write-class kinds).
           - ``untrusted_input``: the effect's metadata carries the
             ``untrusted_input="true"`` marker set by the head-agent / caller.
 
@@ -483,7 +483,7 @@ class EgressBroker:
         return datetime.now(tz=UTC)
 
     # ------------------------------------------------------------------ #
-    # Per-(tenant, run) EnvelopeReviewGate registry (SG-20260624-01)
+    # Per-(tenant, run) EnvelopeReviewGate registry
     # ------------------------------------------------------------------ #
 
     def _review_gate_for(self, tenant_id: TenantId, run_id: str) -> EnvelopeReviewGate | None:
@@ -597,7 +597,7 @@ class EgressBroker:
         except AmbiguousEffectError as exc:
             raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
         principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
-        # EM-02 / SG-20260623-01: resolve effective label via LabelResolver when
+        # EM-02: resolve effective label via LabelResolver when
         # wired; fall back to _default_label (CONFIDENTIAL) for backward-compat.
         container_id = step.id or step.run_id or ""
         if self._label_resolver is not None:
@@ -672,7 +672,7 @@ class EgressBroker:
         if effect.kind is not EffectKind.CONNECTOR_ACTION:
             raise EgressDeniedError(f"dispatch_connector requires a connector_action step, got {effect.kind}")
         principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
-        # EM-02 / SG-20260623-01: resolve effective label via LabelResolver when
+        # EM-02: resolve effective label via LabelResolver when
         # wired; fall back to _default_label (CONFIDENTIAL) for backward-compat.
         connector_container_id = step.id or step.run_id or ""
         if self._label_resolver is not None:
@@ -714,7 +714,7 @@ class EgressBroker:
         """Fully-gated connector egress for a PRE-RUN read (grounding retrieval).
 
         Runs the SAME deny-by-default gates as :meth:`dispatch_connector` — profile
-        boundary, EM-03 signed policy, §A-2.1 Rule-of-Two 3-axis, EM-02 egress-label
+        boundary, EM-03 signed policy, Rule-of-Two 3-axis, EM-02 egress-label
         cap, EM-09 irreversible-staging, and audit-before-act — but SKIPS the EM-07
         authorization-envelope gate, which presupposes a bound run envelope. The
         grounding producer runs this at submission time (``POST /api/command``),

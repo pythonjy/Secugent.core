@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Deterministic taint-provenance producer for Rule of Two axis① (§A-2.1).
+"""Deterministic taint-provenance producer for Rule of Two axis①.
 
 Axis① (``untrusted_input``) of the Rule of Two used to require an **explicit**
 declaration on ``Step.context``; it had no live producer (the deferred
@@ -30,9 +30,7 @@ into ``Step.context``.
 
 :func:`taint_source_for_action` is the deterministic action-type → taint-source
 mapping used by ``HeadAgent._parse_plan`` to automatically inject provenance
-taint from plan structure. See
-``docs/specs/2026-06-13-gc4-axis1-live-provenance.md`` for the full design
-rationale (§A-2 근거).
+taint from plan structure.
 """
 
 from __future__ import annotations
@@ -109,14 +107,14 @@ def taint_source_for_action(
     action_type: ActionType,
     context: Mapping[str, object],
 ) -> TaintSource | None:
-    """Deterministic action-type → taint-source mapping (§A-2.1 Rule-of-Two).
+    """Deterministic action-type → taint-source mapping (Rule-of-Two).
 
     Returns the :class:`TaintSource` that a step with the given ``action_type``
     should carry for axis① (``untrusted_input``), or ``None`` if the action is
     not an untrusted-input source and should carry no automatic taint.
 
     This function is called by ``HeadAgent._parse_plan`` immediately after each
-    :class:`~secugent.core.contracts.Step` is constructed. It closes the §A-2.1
+    :class:`~secugent.core.contracts.Step` is constructed. It closes the Rule-of-Two
     producer gap for ``http_get`` (→ :attr:`TaintSource.WEB_FETCH`) and
     ``connector_action`` (→ :attr:`TaintSource.CONNECTOR_RESPONSE`) — both are
     definitionally untrusted and activate axis① without any explicit flag.
@@ -134,7 +132,7 @@ def taint_source_for_action(
     * ``"file_write"``, ``"desktop"``, ``"compute"``, ``"unknown"`` → ``None`` —
       these are not untrusted-**input** sources.
 
-    **§A-2 근거:**
+    **근거:**
 
     * ``"http_get"`` → :attr:`TaintSource.WEB_FETCH` — web content is
       **definitionally** external/untrusted.

@@ -1,9 +1,9 @@
 name: determinism-reproduction
 
-# BDP Phase 1 item 2 §2.9: prove the deterministic decision path is externally
+# Prove the deterministic decision path is externally
 # reproducible — run the determinism proof TWICE in independent processes and
 # assert the produced report (incl. the canonical output digest) is byte-identical
-# across the two runs. Kept aligned with the local gates (CLAUDE.md §B-9).
+# across the two runs. Kept aligned with the local quality gates.
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      # --- local gates (must match CLAUDE.md §B-9) ---
+      # --- local gates (must match the standard local quality gates) ---
       - name: Lint
         run: ruff check .
       - name: Format check

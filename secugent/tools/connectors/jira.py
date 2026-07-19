@@ -25,7 +25,7 @@ class JiraConnector:
 
     def __init__(self, *, http_transport: Any | None = None) -> None:
         self._buckets: dict[str, TokenBucket] = {}
-        # S5: optional bound transport (see slack.py).
+        # optional bound transport (see slack.py).
         self._bound_transport = http_transport
 
     async def validate_action(self, action: ConnectorAction, policy: ConnectorPolicy) -> None:
@@ -53,7 +53,7 @@ class JiraConnector:
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("jira connector requires OAuth token via SecretsManager")
-        # S5: per-call transport > bound transport > fail closed (no mock success).
+        # per-call transport > bound transport > fail closed (no mock success).
         transport = http_transport if http_transport is not None else self._bound_transport
         if transport is None:
             raise ConnectorTransportUnavailable("jira connector has no transport configured")

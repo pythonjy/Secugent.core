@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MCP tool-server consume adapter (P1, §A-3 P1-3).
+"""MCP tool-server consume adapter (P1).
 
 SecuGent *consumes* an external MCP (Model Context Protocol) tool server by
 wrapping it as a SecuGent :class:`~secugent.tools.connectors.base.Connector`.
@@ -212,14 +212,14 @@ class MCPConnector:
 
 
 # --------------------------------------------------------------------------- #
-# Real httpx JSON-RPC 2.0 transport (S5)
+# Real httpx JSON-RPC 2.0 transport
 # --------------------------------------------------------------------------- #
 
 
 class MCPSettings(BaseModel):
     """Operator config for the production MCP transport (boot-time).
 
-    ``allow_internal`` is False by default (deny-by-default §A-2.2); set True only
+    ``allow_internal`` is False by default (deny-by-default); set True only
     for a closed-network 사내 MCP 도구 서버 whose endpoint is RFC-1918.
     """
 
@@ -307,7 +307,7 @@ def _import_httpx() -> Any:
 
 
 def build_mcp_transport(settings: MCPSettings) -> HttpxMCPTransport:
-    """Materialise the production MCP transport (S5 wire factory).
+    """Materialise the production MCP transport.
 
     The integration step injects the result into :class:`MCPConnector` (or passes
     it at ``execute`` time); this module never reaches ``api/main.py`` itself.

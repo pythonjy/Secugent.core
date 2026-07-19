@@ -9,7 +9,7 @@ from typing import Final
 class OrchestratorEventType:
     """Stringly-typed event topics used by :class:`RunOrchestrator`.
 
-    Names mirror the Mermaid diagrams in ``SecuGent_Flowcharts.html`` so that
+    Names mirror the canonical run event-topic taxonomy so that
     UI panels can subscribe with the same vocabulary.
     """
 
@@ -39,7 +39,7 @@ class OrchestratorEventType:
     # Crash-recovery handover topic. Emitted by the boot recovery driver
     # for every non-skip decision (resume / fail_worker_lost) so the run's audit
     # ribbon records *why* ownership moved. This is an orchestrator event-ribbon
-    # topic, NOT a §C-2 audit ``gate`` enum value.
+    # topic, NOT an audit ``gate`` enum value.
     RUN_HANDOVER: Final[str] = "run.handover"
 
 

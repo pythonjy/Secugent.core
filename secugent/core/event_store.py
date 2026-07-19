@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SQLite-backed durable event/audit store.
 
-Per SECURITY_CONTRACT §5, the store is the *single source of truth* for state
+The store is the *single source of truth* for state
 transitions. Every important event must be appended here **before** being
 broadcast on the Event Bus, and the store must survive server restarts so that
 pending approvals and the most recent events can be recovered.
@@ -236,7 +236,7 @@ class EventStore:
     ) -> None:
         """Append ``event`` and run ``within_txn`` in a single SQLite transaction.
 
-        SG-20260602-02: the audit hash chain needs the event body and its chain
+        the audit hash chain needs the event body and its chain
         row to be written *atomically*. The callback receives this store's live
         connection and may issue additional INSERTs (e.g. into ``event_chain``)
         in the same DB file; either everything commits or — on any failure in the
@@ -424,8 +424,8 @@ class EventStore:
         Used by the audit hash chain to verify each chained event against the
         durable store without loading the whole tenant history into memory.
 
-        Reads the *union* of the hot ``events`` table and ``events_archive``
-        (G-H2): once a sealed-and-expired day is archived+purged its rows leave
+        Reads the *union* of the hot ``events`` table and ``events_archive``:
+        once a sealed-and-expired day is archived+purged its rows leave
         the hot table, but :meth:`ChainedEventStore.verify_chain` must still
         resolve them to confirm the append-only chain links cleanly. The hot
         table takes precedence (it should never disagree, but a deterministic
@@ -449,7 +449,7 @@ class EventStore:
         return self._row_to_event(row)
 
     # ------------------------------------------------------------------ #
-    # Retention (G-H2) — archive-table pattern. Append-only is preserved:
+    # Retention — archive-table pattern. Append-only is preserved:
     # archiving COPIES rows into ``events_archive``; purge only deletes hot
     # rows already confirmed present in the archive. The ``event_chain`` table
     # is never touched, and ``get_event`` reads the live∪archive union so

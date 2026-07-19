@@ -6,7 +6,7 @@ workload: :class:`CredentialBroker` fetches a secret from the secrets layer,
 lends the plaintext to a call **only for the duration of that call**, and
 **scrubs** the token from whatever the call returns. Even a compromised
 connector that echoes the token into its payload cannot leak it back — the
-plaintext never crosses the return boundary (SECURITY_CONTRACT §11.3).
+plaintext never crosses the return boundary.
 
 Failure is closed: if the secret cannot be resolved (missing/empty/backend
 error) the call is never made.
@@ -27,7 +27,7 @@ _PLACEHOLDER = "***REDACTED***"
 # Standard control-flow exceptions whose TYPE must be preserved (cancellation /
 # shutdown semantics) rather than coerced into CredentialError — but whose message
 # is still scrubbed, because a hostile connector could raise one with the token in
-# it (SG-20260605-06). Everything else that is not in the caller's ``reraise_types``
+# it. Everything else that is not in the caller's ``reraise_types``
 # allowlist fails closed as CredentialError.
 _PRESERVE_TYPES: tuple[type[BaseException], ...] = (
     KeyboardInterrupt,
@@ -146,17 +146,17 @@ class CredentialBroker:
             payload = await call(token)
         except BaseException as exc:  # noqa: BLE001 - sanitize + fail-closed; NOTHING may carry the token out
             # ``BaseException`` (not just ``Exception``) is caught so a connector
-            # raising a ``BaseException`` subclass cannot bypass scrubbing
-            # (SG-20260605-06). Capture ONLY token-free primitives here; the
+            # raising a ``BaseException`` subclass cannot bypass scrubbing.
+            # Capture ONLY token-free primitives here; the
             # token-bearing ``exc`` is deleted when this block ends. Reconstruction +
             # raising happen BELOW, OUTSIDE the except — so even a hostile exception
             # type whose constructor itself raises cannot chain the original through
-            # ``__context__``/traceback (SG-20260605-05).
+            # ``__context__``/traceback.
             #
             # Render defensively: ``__str__`` is attacker-controlled (connectors are
             # outside the trust boundary). A hostile ``__str__`` that itself raises
-            # must NOT escape this block carrying the token — fall back to a constant
-            # (SG-20260605-07). The ``.replace`` then scrubs whatever was rendered.
+            # must NOT escape this block carrying the token — fall back to a constant.
+            # The ``.replace`` then scrubs whatever was rendered.
             try:
                 raw = str(exc)
             except BaseException:  # noqa: BLE001 - hostile __str__ must not leak the token

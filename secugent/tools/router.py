@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tool / desktop execution router (Flowchart §11).
+"""Tool / desktop execution router.
 
 Decision order:
 

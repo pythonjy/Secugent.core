@@ -17,11 +17,10 @@ validated, KST-stamped, deterministic dump of one data subject's processing
 records (read-only; never mutates the audit hash chain).
 
 .. note::
-   PIPA §36 / GDPR Art.17 Right-to-**Erasure** is **design only** — see
-   ``docs/specs/2026-06-25-pipa-export-erasure.md`` Part C. Erasure on an
+   PIPA §36 / GDPR Art.17 Right-to-**Erasure** is **design only**. Erasure on an
    append-only, hash-chained log conflicts with audit integrity (re-deriving the
-   chain is rejected, §10.6); the spec evaluates tombstone / crypto-shredding and
-   defers implementation (§B-10 formal-methods area). It is NOT implemented here.
+   chain is rejected); tombstone / crypto-shredding options were evaluated and
+   implementation deferred. It is NOT implemented here.
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ __all__ = [
     "walk_strings",
 ]
 
-#: KST (UTC+9) — 정보주체 열람권 산출물의 생성 시각 타임존(§C-3).
+#: KST (UTC+9) — 정보주체 열람권 산출물의 생성 시각 타임존.
 _KST = timezone(timedelta(hours=9), name="KST")
 
 
@@ -232,8 +231,8 @@ class EDiscoveryExporter:
         never terminates; ``page_size < 0`` makes SQLite treat ``LIMIT -1`` as unbounded
         so every page re-returns all rows and the loop yields duplicates without bound.
         Both are resource-exhaustion / DoS on the compliance-evidence path, so we
-        fail fast (§B-8) at *call* time instead of hanging (adversarial-review
-        finding-3). The validation is eager (raised before the inner generator is
+        fail fast at *call* time instead of hanging. The validation is eager
+        (raised before the inner generator is
         returned) so the ``ValueError`` surfaces even if the caller never iterates.
         """
         if page_size < 1:
@@ -293,7 +292,7 @@ class EDiscoveryExporter:
         ``page_size`` MUST be ``>= 1`` — :meth:`iter_all_events` raises ``ValueError``
         eagerly for non-positive values (0 never terminates; <0 makes SQLite treat
         ``LIMIT -1`` as unbounded → infinite duplicate yield → OOM), so a misuse fails
-        fast at call time rather than hanging the disclosure path (§B-8).
+        fast at call time rather than hanging the disclosure path.
         """
         rows = []
         for event in self.iter_all_events(tenant_id=tenant_id, since=since, page_size=page_size):
@@ -333,7 +332,7 @@ class EDiscoveryExporter:
 
 
 # ---------------------------------------------------------------------------
-# PIPA §35 / GDPR Art.15 — subject-level Right-to-Access export (G-M5)
+# PIPA §35 / GDPR Art.15 — subject-level Right-to-Access export
 # ---------------------------------------------------------------------------
 
 
@@ -434,7 +433,7 @@ class SubjectAccessExporter:
         형식 위반은 즉시 :class:`ValueError`. 호출자(API 라우트)는 *이미 인증된 테넌트와
         요청 테넌트가 일치함*을 추가로 보장해야 한다(cross-tenant 읽기 방지, fail-closed).
 
-        **fail-fast(§B-8)**: 빈 ``subject_id`` (전체 덤프 방지) · 뒤집힌 ``period`` ·
+        **fail-fast**: 빈 ``subject_id`` (전체 덤프 방지) · 뒤집힌 ``period`` ·
         ``page_size < 1`` (자원고갈 차단) 은 즉시 :class:`ValueError`.
 
         **완전성(INV-3)**: ``iter_all_events`` (keyset 커서) 로 소스를 소진할 때까지

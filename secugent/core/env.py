@@ -5,14 +5,14 @@ This is the CORE-level decider so that both the API layer (:mod:`secugent.api.en
 which re-exports it) and core/library modules (e.g. :mod:`secugent.core.llm_client`)
 share **one** function — satisfying INV-C2-1 ("a single function decides dev/prod;
 no other copy of the literal exists"). It lives in ``core`` (not ``api``) because
-``core`` must never import ``api`` (§D-2); the API layer is free to import core.
+``core`` must never import ``api``; the API layer is free to import core.
 
 The leaf module has **no import-time side effects and no guard**, so any module may
 import it safely — including in production and including modules that load before
 auth is wired.
 
-The default is **INVERTED** relative to the historical helpers (§A-2.2
-deny-by-default): production is the safe default and dev must explicitly OPT IN
+The default is **INVERTED** relative to the historical helpers
+(deny-by-default): production is the safe default and dev must explicitly OPT IN
 with ``SECUGENT_ENV=dev``. The previous default of ``"dev"`` silently selected the
 permissive path (the ``X-User-*`` header shim in the API, a ``MockLLMClient`` in the
 LLM resolver) whenever an operator forgot to set the variable — the exact opposite

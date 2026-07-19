@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Background pipeline driver.
 
-Per master prompt §2.3:
+Responsibilities:
 
 * ``start()`` initialises an :class:`asyncio.Semaphore` worker pool.
 * ``enqueue()`` schedules an :func:`asyncio.create_task` wrapping
@@ -169,7 +169,7 @@ class DispatcherProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# SG-20260621-16: 협력자 Protocol (Any 대체 — mypy strict 체크 가능)
+# 협력자 Protocol (Any 대체 — mypy strict 체크 가능)
 # ---------------------------------------------------------------------------
 
 
@@ -177,7 +177,7 @@ class DispatcherProtocol(Protocol):
 class OversightEngineProtocol(Protocol):
     """runner가 호출하는 OversightEngine 메서드 계약.
 
-    set_paused 반환값(bool)이 명시돼 SG-20260621-17 멱등 반환값 검사에서도 사용.
+    set_paused 반환값(bool)이 명시돼 멱등 반환값 검사에서도 사용.
     current_pause_request_id는 BLOCKING-1 fix: dedup 판정용 순수 read 프로브.
     """
 
@@ -225,7 +225,7 @@ SubFactory = Callable[[str, str, "str | None", Any, str], Any]
 """``(actor, plan_approval_id, envelope_hash, oversight, regulations_version)
 -> SubAgent`` — kept here so the FastAPI layer can wire concrete SUB agents
 without the orchestrator caring. ``oversight`` is the per-run
-:class:`~secugent.core.mechanical_oversight.OversightEngine` (G-H4) threaded
+:class:`~secugent.core.mechanical_oversight.OversightEngine` threaded
 explicitly (never via contextvar, mirroring ``envelope_hash``) so each run's
 SUBs read that run's effective tenant policy; ``regulations_version`` is the
 effective policy version stamped onto audit events."""
@@ -293,10 +293,10 @@ class RunOrchestrator:
         # Per-run OversightEngine registry (INV-R6 — contextvar 금지).
         # runner가 소유; register_run_engine/deregister_run_engine 호출로 관리.
         # _engine_registry_lock은 threading.Lock (동기 API에서 접근하므로 asyncio.Lock 불가).
-        # SG-20260621-16: OversightEngineProtocol로 타입 좁히기.
+        # OversightEngineProtocol로 타입 좁히기.
         self._engine_registry: dict[str, OversightEngineProtocol] = {}
         self._engine_registry_lock = threading.Lock()
-        # SG-20260621-01: external registry delegate (AppState._run_engines via
+        # external registry delegate (AppState._run_engines via
         # run_engine_registry=self wiring in main.py). When set, all engine
         # registry operations delegate here so request_pause sees the correct
         # per-run engines registered by DispatcherAdapter.
@@ -304,7 +304,7 @@ class RunOrchestrator:
         # 이미 재디스패치된 체크포인트 참조 추적 (INV-3 멱등 resume)
         self._resumed_checkpoints: set[str] = set()
         self._resumed_checkpoints_lock = threading.Lock()
-        # SG-20260621-09: per-run interrupt state machine records (INV-SM-1).
+        # per-run interrupt state machine records (INV-SM-1).
         # Serialises pause/resume verbs for the same run so illegal transitions
         # (e.g. RESUMING→resume) raise InterruptStateError, not silent no-ops.
         self._interrupt_records: dict[str, RunInterruptRecord] = {}
@@ -380,8 +380,8 @@ class RunOrchestrator:
 
         INV-R6: pause 신호는 이 레지스트리를 통해 명시 전달 — contextvar 금지.
         Lane B의 wiring에서 dispatch 직전에 호출한다.
-        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
-        SG-20260621-16: engine은 OversightEngineProtocol로 좁혀 set_paused 호출 검증.
+        external_engine_registry가 설정되면 위임한다.
+        engine은 OversightEngineProtocol로 좁혀 set_paused 호출 검증.
         """
         if self._external_engine_registry is not None:
             self._external_engine_registry.register_run_engine(run_id, engine)
@@ -392,7 +392,7 @@ class RunOrchestrator:
     def deregister_run_engine(self, run_id: str) -> None:
         """런 종료 시 레지스트리에서 제거 (메모리 누수 방지).
 
-        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
+        external_engine_registry가 설정되면 위임한다.
         AppState는 unregister_run_engine 이름을 사용한다.
         """
         if self._external_engine_registry is not None:
@@ -406,8 +406,8 @@ class RunOrchestrator:
 
         D-L: None 반환 = 런이 현재 디스패치 중이 아님.
         request_pause는 None 시 RunNotDispatchingError를 raise해야 한다.
-        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
-        SG-20260621-16: OversightEngineProtocol 반환 타입으로 set_paused unchecked 차단.
+        external_engine_registry가 설정되면 위임한다.
+        OversightEngineProtocol 반환 타입으로 set_paused unchecked 차단.
         """
         if self._external_engine_registry is not None:
             # _external_engine_registry는 AppState (Any) — 반환값은 구조적으로 OversightEngineProtocol을 만족함.
@@ -428,19 +428,19 @@ class RunOrchestrator:
 
         D-L: 엔진이 없으면 RunNotDispatchingError (silent fallback 금지).
         R2: 동일 request_id → 멱등 (엔진의 set_paused가 처리).
-        §7.1: actor 파라미터 필수 (§9.1 인터럽트 이벤트 귀속).
+        actor 파라미터 필수 (인터럽트 이벤트 귀속).
 
-        SG-20260621-17: set_paused의 멱등 반환값을 호출자에게 전달한다.
+        set_paused의 멱등 반환값을 호출자에게 전달한다.
           True  = 신규 인터럽트 신호 설정 → 이벤트를 적재해야 함.
-          False = 동일 request_id 중복 요청 → 이벤트 재방출 금지(§10 D-3 위협).
-        SG-20260621-21: 상태 전이는 엔진 부수효과 *성공 이후*로 미룬다.
+          False = 동일 request_id 중복 요청 → 이벤트 재방출 금지(중복 방출 위협).
+        상태 전이는 엔진 부수효과 *성공 이후*로 미룬다.
         엔진이 None이면 레코드 전이 없이 즉시 RunNotDispatchingError를 raise한다.
         이로써 엔진 None 시 INTERRUPT_REQUESTED에 고착되는 회귀를 방지한다.
         """
-        # SG-20260621-09 + SG-20260621-21: state guard BEFORE side-effect.
+        # state guard BEFORE side-effect.
         # Read the current state under the lock to decide if we can proceed;
-        # we do NOT transition yet (SG-21 fix: transition only after set_paused succeeds).
-        # SG-20260621-17: INTERRUPT_REQUESTED 상태에서 동일 request_id 재진입은
+        # we do NOT transition yet (transition only after set_paused succeeds).
+        # INTERRUPT_REQUESTED 상태에서 동일 request_id 재진입은
         # InterruptStateError가 아니라 멱등 no-op(False 반환)으로 처리한다.
         # 이를 위해 엔진의 set_paused를 먼저 시도해 실제 멱등 여부를 확인한다.
         with self._interrupt_records_lock:
@@ -454,13 +454,13 @@ class RunOrchestrator:
                 )
             ):
                 # Already transitioning or already requested.
-                # SG-20260621-17: INTERRUPT_REQUESTED 상태에서는 엔진에 멱등 체크를 위임한다.
+                # INTERRUPT_REQUESTED 상태에서는 엔진에 멱등 체크를 위임한다.
                 # 동일 request_id면 set_paused가 False를 반환 → 멱등 no-op.
                 # 다른 request_id면 엔진도 새 pause를 설정하려 시도하지만 상태기계가 막는다.
                 if rec.interrupt_state in (InterruptState.INTERRUPT_REQUESTED, InterruptState.PAUSING):
                     # BLOCKING-1 fix: dedup 판정은 순수 read 프로브로만 수행한다.
                     # set_paused(mutate)를 호출하면 다른 request_id의 stop_mode·actor가
-                    # 엔진 상태를 오염시킨 뒤 raise된다 (§9.1 귀속 오염 + D-J abort 위협).
+                    # 엔진 상태를 오염시킨 뒤 raise된다 (귀속 오염 + abort 위협).
                     _engine_pre = self.resolve_run_engine(run_id)
                     if _engine_pre is not None:
                         _active_req_id = _engine_pre.current_pause_request_id()
@@ -468,12 +468,12 @@ class RunOrchestrator:
                             # 동일 request_id → 멱등 no-op, 이벤트 미방출
                             return False
                     # 다른 request_id (또는 엔진 없음) → 상태기계 위반으로 raise.
-                    # 엔진 상태는 변경되지 않았으므로 §9.1 귀속이 보존된다.
+                    # 엔진 상태는 변경되지 않았으므로 귀속이 보존된다.
                     raise InterruptStateError(rec.interrupt_state, InterruptState.INTERRUPT_REQUESTED)
                 # 그 외 전이 불가 상태 (PAUSED_SNAPSHOTTED, RESUMING 등)
                 raise InterruptStateError(rec.interrupt_state, InterruptState.INTERRUPT_REQUESTED)
 
-        # SG-20260621-21: resolve engine BEFORE state transition.
+        # resolve engine BEFORE state transition.
         # If the engine is None, raise without creating/mutating the record.
         engine = self.resolve_run_engine(run_id)
         if engine is None:
@@ -482,7 +482,7 @@ class RunOrchestrator:
                 "이미 완료됐거나 아직 시작되지 않았을 수 있습니다."
             )
         stop_mode = mode == "stop"
-        # SG-20260621-17: capture the idempotent return value.
+        # capture the idempotent return value.
         # True  = first set for this request_id → caller MUST emit the audit event.
         # False = duplicate request_id → caller MUST skip re-emitting the event.
         is_new_signal = engine.set_paused(
@@ -491,7 +491,7 @@ class RunOrchestrator:
             actor=actor,
             stop_mode=stop_mode,
         )
-        # State transition AFTER the side-effect succeeded (SG-20260621-21).
+        # State transition AFTER the side-effect succeeded.
         # Now it is safe to record the transition — the engine is set.
         with self._interrupt_records_lock:
             rec = self._interrupt_records.setdefault(run_id, RunInterruptRecord(run_id=run_id))
@@ -506,7 +506,7 @@ class RunOrchestrator:
     def notify_pause_completed(self, run_id: str) -> None:
         """체크포인트 write 성공 후 상태기계를 PAUSED_SNAPSHOTTED로 전이한다.
 
-        SG-20260621-20: 협조적 정지가 실제 일어나는 지점
+        협조적 정지가 실제 일어나는 지점
         (DispatcherAdapter._handle_pause_result의 체크포인트 write 성공 직후)에서
         runner가 INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED 전이를 구동한다.
         이 메서드를 호출하지 않으면 resume이 PAUSED_SNAPSHOTTED 상태가 아니어서
@@ -547,10 +547,10 @@ class RunOrchestrator:
         engine pause is cleared. When None, the event is omitted (backward-compat
         for callers that have not wired a SteerHandler).
 
-        SG-20260621-20: resume 성공 후 RESUMING→RUNNING 전이를 추가한다.
+        resume 성공 후 RESUMING→RUNNING 전이를 추가한다.
         이로써 같은 런의 2차 pause/resume도 가능해진다.
         """
-        # SG-20260621-09 + SG-20260621-20: verify state machine allows resume.
+        # verify state machine allows resume.
         # PAUSED_SNAPSHOTTED (or REINSTRUCTING) → RESUMING is the only legal path.
         # If no record exists (no prior pause), allow resume without transition
         # (backward-compat: checkpoint may have been written by a prior process).
@@ -568,13 +568,13 @@ class RunOrchestrator:
         except KeyError as exc:
             raise CheckpointMismatchError(f"체크포인트를 찾을 수 없습니다: {from_ref.uri!r}") from exc
 
-        # SG-20260621-03: cross-tenant checkpoint validation
+        # cross-tenant checkpoint validation
         if expected_tenant is not None and checkpoint.tenant_id != expected_tenant:
             raise CheckpointMismatchError(
                 f"체크포인트 tenant_id {checkpoint.tenant_id!r} != 예상 {expected_tenant!r}"
             )
 
-        # SG-20260621-07: verify checkpoint belongs to this run
+        # verify checkpoint belongs to this run
         if checkpoint.run_id != run_id:
             raise CheckpointMismatchError(f"checkpoint.run_id={checkpoint.run_id!r} != run_id={run_id!r}")
 
@@ -588,7 +588,7 @@ class RunOrchestrator:
                 f"재개 시 Rule-of-Two 3축 감지 → HITL 승인 필요 (INV-9). axes={sorted(str(a) for a in axes)}"
             )
 
-        # SG-20260621-22: HA lease 재획득 — _run_pipeline_leased와 동일 단일-리더 보장.
+        # HA lease 재획득 — _run_pipeline_leased와 동일 단일-리더 보장.
         # If a lease manager is wired, the node resuming a checkpoint MUST hold the
         # lease before dispatching; otherwise two nodes can execute the same run
         # concurrently (fail-open double-execute). LeaseLostError → fail-closed
@@ -614,7 +614,7 @@ class RunOrchestrator:
                 return
 
         # INV-3: 멱등 — 동일 URI 두 번 호출 시 두 번째는 no-op
-        # SG-20260621-10: check-only here; mark AFTER successful dispatch
+        # check-only here; mark AFTER successful dispatch
         with self._resumed_checkpoints_lock:
             if from_ref.uri in self._resumed_checkpoints:
                 return
@@ -648,12 +648,12 @@ class RunOrchestrator:
         try:
             await self._dispatcher.dispatch(run_id=run_id, plan=pending_plan)
         except Exception:
-            # SG-20260621-10: dispatch 실패 시 URI를 marked하지 않아 재시도 가능
+            # dispatch 실패 시 URI를 marked하지 않아 재시도 가능
             raise
-        # dispatch 성공 후에만 멱등 URI 마킹 (SG-20260621-10)
+        # dispatch 성공 후에만 멱등 URI 마킹
         with self._resumed_checkpoints_lock:
             self._resumed_checkpoints.add(from_ref.uri)
-        # SG-20260621-20: RESUMING→RUNNING 전이 (dispatch 성공 후).
+        # RESUMING→RUNNING 전이 (dispatch 성공 후).
         # 이로써 같은 런의 2차 pause/resume이 가능해진다.
         with self._interrupt_records_lock:
             rec2 = self._interrupt_records.get(run_id)
@@ -746,7 +746,7 @@ class RunOrchestrator:
         step subset so the dispatcher mints a narrowed :class:`ApprovalScope`.
         Unselected steps are never authorized (deny-by-default / fail-closed,
         INV-W5C-5). The caller (the FastAPI plan-decision route) has already
-        validated the subset and stamped the §C-2 plan_review audit event.
+        validated the subset and stamped the plan_review audit event.
         """
         await self._signal(
             run_id,
@@ -924,7 +924,7 @@ class RunOrchestrator:
             await asyncio.sleep(interval)
             # A LeaseLostError here propagates out of the task (the caller surfaces
             # it via renew_task.result()); any other error also propagates rather
-            # than being swallowed (fail-fast, §B-8).
+            # than being swallowed (fail-fast).
             await manager.renew(run_id, self._worker_id, self._lease_ttl_seconds)
 
     @staticmethod
@@ -1192,27 +1192,27 @@ class RunOrchestrator:
         * No ledger attached ⇒ ``None`` (legacy callers unaffected, no gate).
         * Missing tenant (``None``) **with a ledger attached** ⇒ ``"invalid_tenant"``.
           A tenant-less run must not silently share a global "unknown" budget under
-          an active meter (finding 6, L465) — deny-by-default.
+          an active meter — deny-by-default.
         * ``tenant_id`` fails the :class:`TenantId` regex (empty, uppercase,
           leading hyphen, >63 chars, control/path chars, non-str) ⇒
-          ``"invalid_tenant"``. For a **deny-by-default** budget control (A-2 #2,
-          §B-8) an unidentifiable tenant must FAIL CLOSED — never skip the meter
+          ``"invalid_tenant"``. For a **deny-by-default** budget control, an
+          unidentifiable tenant must FAIL CLOSED — never skip the meter
           and run unbudgeted. Earlier code returned "allow" here, which let any
-          programmatic/re-enqueue caller bypass the cap entirely (findings 1 & 6).
+          programmatic/re-enqueue caller bypass the cap entirely.
         * Over the daily/monthly cap ⇒ ``"quota_exceeded"``.
         * Otherwise ⇒ ``None``.
 
         The budget decision itself is never re-implemented here: it delegates to
         the single source of truth, :meth:`CostLedger.enforce_or_raise`.
 
-        Concurrency note (edge case 12.7) — HONEST RESIDUAL, not a mitigated gap:
+        Concurrency note (concurrency edge case) — HONEST RESIDUAL, not a mitigated gap:
         this pre-flight gate (and the per-step ``SubAgent`` gate) is a pure READ,
         so two same-tenant runs admitted in the same instant both observe the same
         pre-spend total and may together overshoot the cap. A strict atomic
         admission reservation is intentionally NOT shipped: per-run spend is
         unknown at admission (it is metered per model-call), so any reserved
         amount would be arbitrary. This is a documented residual; do not read it
-        as defence-in-depth the code does not provide (§B-8 fail-fast, §12.6 I1).
+        as defence-in-depth the code does not provide (fail-fast, invariant I1).
 
         COST-01 (resolved): in-run self-inflicted spend IS now recorded live. The
         usage observer on the live LLM client (installed by ``create_app`` via
@@ -1296,8 +1296,8 @@ async def _noop_publish(run_id: str, topic: str, payload: dict[str, Any]) -> Non
 # included because ``GET /runs/{id}/plan-decision`` recomputes the Rule of Two
 # axes (``rule_of_two.axes_for_steps``) from the persisted steps, and axis ①
 # (untrusted_input) is carried in ``Step.context`` provenance — dropping it would
-# make the audited ``rule_of_two_axes`` under-report the real axes (a §C-2 honesty
-# violation). The §C-2 plan_review audit must match the scope the dispatcher mints.
+# make the audited ``rule_of_two_axes`` under-report the real axes (an audit honesty
+# violation). The plan_review audit must match the scope the dispatcher mints.
 _PLAN_STEP_FIELDS = (
     "id",
     "tenant_id",
@@ -1338,9 +1338,9 @@ def _bind_plan_evidence(context: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Bind runtime connector/tool grounding into persisted ``plan['evidence']``.
 
     The producer half of the grounding-citation path (2026-07-13). SecuGent builds
-    no retrieval engine (§A-1): a retrieval connector / MCP tool (or the caller
+    no retrieval engine: a retrieval connector / MCP tool (or the caller
     that ran one) places its result's ``evidence`` list on the run context under
-    ``grounding_evidence``; this re-validates it fail-closed (§B-8) against the N2
+    ``grounding_evidence``; this re-validates it fail-closed against the producer's
     :class:`~secugent.core.grounding.Evidence` schema and returns citation dicts
     for durable persistence.
 

@@ -74,7 +74,7 @@ class PolicyResolvingSource(Protocol):
     Satisfied by ``ConnectorRegistry.get_policy_for`` (tenant override → binding
     policy → ``None``). Declared structurally — not imported — so a static-Mapping
     source or a custom source lacking the method simply fails ``isinstance`` and
-    the transport falls back to the static ``binding.policy`` (SG-20260605-01).
+    the transport falls back to the static ``binding.policy``.
     """
 
     def get_policy_for(
@@ -139,7 +139,7 @@ class ConnectorTransport:
         except ConnectorNotFound:
             # The deliberate "unregistered" signal ⇒ fail-closed (None). Other
             # exceptions are source bugs (lock errors, custom-source faults) and
-            # must NOT be silently coerced to "simple unregistered" (§B-8): log
+            # must NOT be silently coerced to "simple unregistered": log
             # them with a traceback, then still fail closed.
             return None
         except Exception:  # noqa: BLE001 - source bug ⇒ log + fail-closed, never execute
@@ -151,7 +151,7 @@ class ConnectorTransport:
     ) -> ConnectorPolicy:
         """Resolve the **tenant-effective** policy to hand the connector.
 
-        SG-20260605-01: ``apply_tenant_policy`` binds a tenant's
+        ``apply_tenant_policy`` binds a tenant's
         ``REGULATIONS.connector_policies`` as per-connector overrides, but the
         egress path used to pass the *static* ``binding.policy``, so overrides were
         dead at runtime. Here ``effective`` may differ from ``binding.policy``: a
@@ -188,7 +188,7 @@ class ConnectorTransport:
         # rejects empty/qualified tokens, so a malformed residual (e.g. the
         # multi-dot 'a.b' from 'slack.a.b') fails here. It is denied WITH an audit
         # so the malformed-action deny stays audit-symmetric with the
-        # unknown-connector deny (SG-20260604-03) instead of leaking a bare
+        # unknown-connector deny instead of leaking a bare
         # ValidationError to the caller.
         try:
             action = ConnectorAction.model_validate({"name": action_name, "params": dict(effect.meta)})
@@ -196,7 +196,7 @@ class ConnectorTransport:
             self._record_denied(request, connector_name, action_str, "malformed action")
             raise CredentialError(f"malformed connector action {action_str!r}") from exc
 
-        # Membership gate (SG-20260604-02 / SECURITY_CONTRACT §7, deny-by-default):
+        # Membership gate (deny-by-default):
         # the connector's declared ``actions`` tuple is the authority for *which*
         # actions are valid — ``ConnectorAction.name`` was generalised from a
         # closed ``Literal`` to ``str`` (runtime extensibility), so the membership
@@ -212,7 +212,7 @@ class ConnectorTransport:
         supports_obo = bool(getattr(binding.connector, "supports_obo", False))
         identity = self._identity.resolve(request.principal, supports_obo=supports_obo, run_id=request.run_id)
 
-        # SG-20260605-01: resolve the tenant-effective policy AFTER the membership
+        # resolve the tenant-effective policy AFTER the membership
         # gate and BEFORE the credential is resolved. ``effective`` may shadow the
         # static ``binding.policy`` with the tenant override (registry path); on the
         # static-Mapping / no-override paths it IS ``binding.policy``. The connector
@@ -231,7 +231,7 @@ class ConnectorTransport:
             return dict(result.payload)
 
         # Enforce the EFFECTIVE policy and audit any denial as ``connector.denied``
-        # (SG-20260605-01), fail-closed, never swallowed (§B-8 / §C-1).
+        # fail-closed, never swallowed.
         #
         # Two policy gates raise from two places, both surfaced here with their
         # real type so the deny reason is auditable:

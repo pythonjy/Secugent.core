@@ -2,8 +2,7 @@
 """Signed, compiled policy artifacts (EM-03).
 
 Mechanical Oversight enforces only signature-verified, compiled policy — the
-authority lives in a human-signed artifact, not LLM output (SECURITY_CONTRACT
-§11 I-D). See ``docs/specs/2026-06-02-em-03-policy-compiler.md``.
+authority lives in a human-signed artifact, not LLM output.
 """
 
 from __future__ import annotations

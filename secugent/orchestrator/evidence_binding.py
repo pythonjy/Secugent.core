@@ -7,7 +7,7 @@ payload, re-validating every element against the N2
 :class:`~secugent.core.grounding.Evidence` schema before it can ground a plan
 decision.
 
-The re-validation is deliberately defensive (§B-8): even though the connector
+The re-validation is deliberately defensive: even though the connector
 already validated the evidence, this injection boundary re-checks it and admits
 **all-or-nothing** — a single malformed element fails the whole batch
 (:class:`EvidenceBindingError`), never a partial admission (INV-N3-4). This is the
@@ -42,9 +42,9 @@ class EvidenceBindingError(ValueError):
 
 
 def evidence_from_connector_payload(payload: Mapping[str, Any]) -> list[Evidence]:
-    """Parse ``payload['evidence']`` (N1's dict list) into validated Evidence.
+    """Parse ``payload['evidence']`` (the producer's dict list) into validated Evidence.
 
-    Contract (spec ``docs/specs/2026-07-12-evidence-orchestration-audit.md``):
+    Contract:
 
     * ``evidence`` key **absent** → ``[]`` (a tool response with no grounding is
       normal, not an error).

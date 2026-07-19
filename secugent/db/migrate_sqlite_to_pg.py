@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Append-only SQLite→PG migration with hash-chain re-verification.
 
-Copies the durable run + §C-2 hash-chained event history from the SQLite
+Copies the durable run + hash-chained event history from the SQLite
 reference store into PostgreSQL **in chain order**, then re-verifies the chain on
 the PG side (reusing :mod:`secugent.audit.hash_chain` semantics via
 :meth:`PgChainedEventStore.verify_chain`) and asserts the PG chain reproduces the
@@ -52,7 +52,7 @@ class MigrationError(RuntimeError):
     """Raised when the SQLite→PG migration cannot complete fail-closed.
 
     Carries no row content / secret — only counts and the tenant/seq context
-    needed for an operator to act (§B-8 no-leak).
+    needed for an operator to act (no-leak).
     """
 
 

@@ -1,8 +1,8 @@
-# LangChain demo (BDP_02 item 4 — embed SDK)
+# LangChain demo (embed SDK)
 
 Wrap a **LangChain-style tool** in SecuGent oversight so a policy-violating tool
 call is deterministically **HARD BLOCKed** before it runs. This is the
-framework-neutral embed / OEM premise (§A-2.3): an SI/vendor wraps *their* existing
+framework-neutral embed / OEM premise: an SI/vendor wraps *their* existing
 LangChain agent/tool — SecuGent does not own their runtime.
 
 ```bash
@@ -16,13 +16,13 @@ The example runs **with or without** `langchain` installed:
 - **langchain absent** → prints the `pip install secugent[langchain]` hint, then
   demonstrates the **same core block** with a langchain-free wrapped tool
   (`wrap_langchain_tool`). The control verdict is identical — langchain only adds
-  the callback plumbing, never the decision (invariant I1: single control source).
+  the callback plumbing, never the decision (a single control source: the SDK never re-implements it).
 
 ## What it shows
 - [x] A LangChain tool call routed through SecuGent **Mechanical Oversight**
       (REGULATIONS HARD BLOCK) before execution — `*/대외비/*` is denied.
 - [x] A compliant tool call (`/srv/공개/notice.txt`) passes the gate.
-- [x] Each decision emits a **§C-2 audit event** (printed to the console here;
+- [x] Each decision emits a **structured audit event** (printed to the console here;
       production wires a `ChainedEventStore`-backed sink).
 - [x] `pip install secugent[langchain]` optional extra (isolated; never a Core dep).
 

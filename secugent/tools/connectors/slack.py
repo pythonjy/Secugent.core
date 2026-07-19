@@ -25,7 +25,7 @@ class SlackConnector:
 
     def __init__(self, *, http_transport: Any | None = None) -> None:
         self._buckets: dict[str, TokenBucket] = {}
-        # S5: optional bound transport used when execute() gets no per-call one
+        # optional bound transport used when execute() gets no per-call one
         # (so the SubAgent → broker path reaches a real transport once wired).
         self._bound_transport = http_transport
 
@@ -52,7 +52,7 @@ class SlackConnector:
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("slack connector requires OAuth token via SecretsManager")
-        # S5: per-call transport > bound transport > fail closed (no mock success).
+        # per-call transport > bound transport > fail closed (no mock success).
         transport = http_transport if http_transport is not None else self._bound_transport
         if transport is None:
             raise ConnectorTransportUnavailable("slack connector has no transport configured")

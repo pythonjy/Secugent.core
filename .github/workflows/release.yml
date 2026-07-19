@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# BDP_05 item 5 — Signed release pipeline (secugent-core v0.1.0).
+# Signed release pipeline (secugent-core v0.1.0).
 #
 # Trigger: push of a semver tag matching "v*" (e.g. v0.1.0).
 # Non-tag pushes to main are handled by secugent.yml / determinism.yml.
 #
-# Job ordering (fail-closed — I2):
+# Job ordering (fail-closed):
 #   gate  →  build  →  publish  →  sign-release
 #
 # * publish and sign-release never run unless gate AND build both succeeded.
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # gate — all §B-9 local gates + release-check (I2: must pass before build)
+  # gate — all local quality gates + release-check (must pass before build)
   # ---------------------------------------------------------------------------
   gate:
     name: Release gate
@@ -78,12 +78,12 @@ jobs:
           --cov-fail-under=85
 
       # REQUIRED before publish — import-closure + secret + strategy-doc scan.
-      # Exit non-zero means at least one invariant (I2/I4/I5) is violated;
+      # Exit non-zero means at least one public-release invariant is violated;
       # the needs chain ensures publish never runs in that case.
       - name: Public-release gate (check_public_release.py)
         run: python scripts/check_public_release.py
 
-      # Verify version tag matches pyproject.toml (edge case §5.5 version mismatch).
+      # Verify version tag matches pyproject.toml (guards the version-mismatch edge case).
       - name: Assert tag version == pyproject.toml version
         run: |
           python - <<'PY'
@@ -99,7 +99,7 @@ jobs:
           PY
 
   # ---------------------------------------------------------------------------
-  # build — produce wheel + sdist + SBOM; assert wheel excludes Enterprise (I3)
+  # build — produce wheel + sdist + SBOM; assert wheel excludes Enterprise
   # ---------------------------------------------------------------------------
   build:
     name: Build wheel, sdist, SBOM
@@ -132,10 +132,10 @@ jobs:
           python scripts/gen_sbom.py --output sbom/sbom.json
 
       # Assert open-core boundary: the wheel must NOT contain Enterprise packages.
-      # This is Invariant I3 and is tested by test_open_core_boundary.py; running
+      # This is the open-core boundary invariant and is tested by test_open_core_boundary.py; running
       # the dedicated test here in the build job provides a tight loop even if
       # the gate job's broader pytest run is caching results.
-      - name: Assert wheel excludes Enterprise packages (I3)
+      - name: Assert wheel excludes Enterprise packages
         env:
           ANTHROPIC_API_KEY: ""
         run: pytest tests/unit/test_open_core_boundary.py::test_core_wheel_excludes_enterprise_packages -q
@@ -195,7 +195,7 @@ jobs:
     name: Sign artifacts and create GitHub Release
     # Must depend on publish so that a failed PyPI upload prevents a GitHub
     # Release from advertising a package that was never actually published.
-    # Transitive chain: gate → build → publish → sign-release (I2 fail-closed).
+    # Transitive chain: gate → build → publish → sign-release (fail-closed).
     needs: [publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10

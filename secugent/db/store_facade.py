@@ -18,7 +18,7 @@ This module provides:
   exposes the exact sync methods the live path uses (``upsert_run``,
   ``append_event``, ``append_chained``, ``save_approval``). It mirrors the SQLite
   split: ``append_event`` writes a raw (unchained) event row, ``append_chained``
-  writes the §C-2 hash-chained row — so PG parity matches the SQLite reference.
+  writes the hash-chained row — so PG parity matches the SQLite reference.
 
 HONEST CONCURRENCY CAVEAT (why the live request-path swap is STAGED, not flipped
 on by default): each bridge call blocks the **calling** thread until the PG
@@ -110,7 +110,7 @@ class SyncPgEventStore:
     ) -> None:
         self._chained = chained
         # The raw (unchained) inner store mirrors EventStore.append_event: a plain
-        # event row WITHOUT a chain link, for the non-§C-2 events the SQLite live
+        # event row WITHOUT a chain link, for the non-chained events the SQLite live
         # path writes through ``state_.store.append_event``.
         self._raw: _RawAppendable = chained.inner
         self._call_timeout_s = call_timeout_s
@@ -142,7 +142,7 @@ class SyncPgEventStore:
         self._run(self._raw.append(event))
 
     def append_chained(self, event: Event) -> None:
-        """Persist a §C-2 hash-chained event — mirrors ``ChainedEventStore.append_event``."""
+        """Persist a hash-chained event — mirrors ``ChainedEventStore.append_event``."""
         self._run(self._chained.append(event))
 
     def save_approval(self, approval: Approval) -> None:
@@ -174,7 +174,7 @@ class AsyncLiveStore:
       SAME cached :class:`ChainedEventStore` and its ``inner`` :class:`EventStore`.
       No thread offload, no re-ordering — each ``async def`` here just wraps the
       identical sync call the handler makes today, so the determinism path and the
-      event ORDER are byte-identical. The §C-2 hash chain stays the single cached
+      event ORDER are byte-identical. The hash chain stays the single cached
       decorator (one chain over one DB file).
     * ``backend="postgres"``: ``await`` the async :class:`PgChainedEventStore`
       (which already carries RLS + the tenant second-guard + the single-writer
@@ -183,7 +183,7 @@ class AsyncLiveStore:
 
     NOTE (spec refinement): the SQLite branch takes a :class:`ChainedEventStore`
     (not a bare :class:`EventStore`) so that ``append_chained``/``verify_chain``
-    reuse the SINGLE cached audit chain (SECURITY_CONTRACT §10.1 — one decorator
+    reuse the SINGLE cached audit chain (one decorator
     over one DB file) instead of forking a second chain; raw reads/writes go
     through its ``inner`` store. The read methods carry ``tenant_id`` because the
     PG branch needs it for RLS.
@@ -240,7 +240,7 @@ class AsyncLiveStore:
             await self._pgs().inner.append(event)
 
     async def append_chained(self, event: Event) -> ChainedEventRecord:
-        """Persist a §C-2 hash-chained event and return its record."""
+        """Persist a hash-chained event and return its record."""
         if self._backend == "sqlite":
             return self._sq().append_event(event)
         return await self._pgs().append_chained(event)
@@ -287,7 +287,7 @@ class AsyncLiveStore:
         return await self._pgs().list_pending_approvals(tenant_id=scoped)
 
     async def verify_chain(self, *, tenant_id: str) -> bool:
-        """Walk the §C-2 chain; raise ``AuditChainBrokenError`` on the first break.
+        """Walk the hash chain; raise ``AuditChainBrokenError`` on the first break.
 
         Tenant-scoped (matches both backends' ``verify_chain`` contract); returns
         ``True`` when intact. The PG branch's false-break hazards — JSONB numeric

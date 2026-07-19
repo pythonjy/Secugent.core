@@ -4,14 +4,14 @@
 Both apply the **same** core oversight gate
 (:class:`~secugent.sdk.gate.OversightGate`) as ``@require_oversight`` — there is
 no second control implementation and, critically, **no execution path that
-reaches the wrapped app/tool without first passing the gate** (the §4.8 boundary
+reaches the wrapped app/tool without first passing the gate** (the boundary
 invariant). A REGULATIONS violation HARD BLOCKs before the downstream callable
 runs; a Rule-of-Two 3-axis request forces HITL (fail-closed).
 
 :class:`OversightMiddleware` is intentionally framework-light: it is a plain
 callable wrapper (``mw(*args, **kwargs) -> downstream(*args, **kwargs)``) so it
 drops in front of any callable request handler — including an ASGI ``app`` —
-without binding the Core SDK to a web framework (framework-neutral, §A-2.3).
+without binding the Core SDK to a web framework (framework-neutral).
 ``target_from`` maps the call arguments to the resource string the REGULATIONS
 matchers see; it defaults to a fail-closed extractor that pulls the request path
 from an ASGI ``scope`` dict (``app(scope, receive, send)``) — NOT ``str(scope)``,

@@ -10,7 +10,7 @@ transport / retry / validation / redaction behaviour and differ only in:
 
 Those three vendor-specific concerns are template methods; everything else
 (input validation, bounded retry, token-limit enforcement, secret redaction,
-JSON/format error handling) lives here once (§B-6 single-responsibility, no
+JSON/format error handling) lives here once (single-responsibility, no
 copy-paste across adapters).
 
 No control decision is made here. Adapters are model-neutral wrappers around
@@ -45,7 +45,7 @@ _logger = logging.getLogger(__name__)
 # OpenAI-compatible chat-completions sub-path appended to a ``/v1`` base.
 _OPENAI_CHAT_PATH: Final[str] = "/chat/completions"
 
-# The OpenAI ``/v1`` API version segment. W6 BLOCKER LLM: the ``/v1`` requirement
+# The OpenAI ``/v1`` API version segment. The ``/v1`` requirement
 # was previously only documented in a comment, so a base endpoint given without it
 # produced ``<host>/chat/completions`` (a silent 404). ``_request_url`` now inserts
 # this segment when it is absent.
@@ -76,7 +76,7 @@ def _is_cloud_model_id(model: str) -> bool:
 _DEFAULT_MAX_ATTEMPTS: Final[int] = 3
 
 # Defensive cap so a buggy caller cannot request an unbounded generation that
-# would blow the token/cost budget on a sovereign endpoint (§B-10).
+# would blow the token/cost budget on a sovereign endpoint.
 _MAX_TOKENS_LIMIT: Final[int] = 8192
 
 # Statuses that are worth retrying (transient upstream conditions) vs. those
@@ -153,7 +153,7 @@ class BaseDomesticLLMClient(LLMClient):
         # the domestic path the endpoint serves exactly one configured model, so
         # forwarding the caller's id would be rejected upstream.
         effective_model = self._model_id if self._model_id is not None else model
-        # W6 BLOCKER LLM: fail FAST when no ``SECUGENT_DOMESTIC_MODEL_ID`` override
+        # fail FAST when no ``SECUGENT_DOMESTIC_MODEL_ID`` override
         # is bound and the caller's per-call ``model`` is a hosted cloud id (the
         # generic Claude/OpenAI default). Forwarding it to a sovereign/closed-network
         # endpoint that serves its OWN model yields a silent 404 after the retry
@@ -208,7 +208,7 @@ class BaseDomesticLLMClient(LLMClient):
         messages: list[dict[str, str]],
         max_tokens: int,
     ) -> list[dict[str, str]]:
-        """Validate and normalize caller inputs (§B-8 boundary check).
+        """Validate and normalize caller inputs (boundary check).
 
         Returns the normalized message list. Raises :class:`LLMError` (never
         leaking content) on a contract violation.
@@ -419,7 +419,7 @@ class OpenAICompatibleLLMClient(BaseDomesticLLMClient):
         if base.endswith(_OPENAI_CHAT_PATH):
             # Caller supplied the full chat-completions URL — honour it verbatim.
             return base
-        # W6 BLOCKER LLM: ensure the ``/v1`` version segment is present so a bare
+        # ensure the ``/v1`` version segment is present so a bare
         # host base (``https://host``) becomes ``https://host/v1/chat/completions``
         # instead of a silent 404 on ``https://host/chat/completions``. A base that
         # already carries ``/v1`` (as a trailing or interior segment) is left as-is.

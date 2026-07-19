@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Approval token issuance, verification, expiry, and nonce-reuse defenses.
 
-Per SECURITY_CONTRACT §4, every approval token carries a strict
+Every approval token carries a strict
 :class:`secugent.core.contracts.ApprovalScope`. The token is single-use
 (consumed on first successful execution), bound to a fixed nonce that cannot
 be reused, and re-verified at step execution time — never trusted on the
@@ -69,7 +69,7 @@ def _observe_approval_wait(approval: Approval) -> None:
 
     ``wait_seconds`` is the elapsed time from ``approval.created_at`` to now.
     The ``risk_band`` label is derived from the approval scope's ``max_risk``
-    ceiling via :func:`_risk_band` (G-H8) — the strongest risk this approval is
+    ceiling via :func:`_risk_band` — the strongest risk this approval is
     authorized to cover — so the histogram is sliceable by risk tier instead of
     the former opaque ``"unknown"``.
     """
@@ -243,14 +243,14 @@ class ApprovalService:
         step_dedicated = scope.step_ids == [step.id]
 
         # Generalize the single-axis carve-out to the full Rule of Two
-        # (§A-2.1). A step that trips all three axes (untrusted input + sensitive
+        # (Rule of Two). A step that trips all three axes (untrusted input + sensitive
         # access + external comm) can NEVER ride a plan-level pre-approval — it is
         # authorized ONLY by an approval dedicated to this exact step (a fresh,
         # step-scoped HITL). ``connector_action`` is a strict special case of this
         # (it is always axes ②+③ and is additionally forbidden in
         # ``allowed_action_types`` by ``ApprovalScope``). Closing the invariant
         # here in the core means a non-dedicated Rule-of-Two scope can never be
-        # smuggled through, independent of the caller graph (SG-20260604-04).
+        # smuggled through, independent of the caller graph.
         # Axis ① (untrusted_input) is auto-derived by ``RuleOfTwoContext.from_step``
         # from a ``provenance`` block in ``Step.context``, so a provenance-tainted
         # 3-axis step is forced through a step-dedicated HITL here too — no logic

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 4B · G-H2 — deterministic 6-month audit retention.
+"""Deterministic 6-month audit retention.
 
 EU AI Act Art.26 and the Korean AI Basic Act require operators to *retain*
 machine-generated logs for at least six months. They do not require keeping them
@@ -7,7 +7,7 @@ forever, and an unbounded ``events`` table is an operational liability. This
 module enforces the retention window **deterministically** while preserving the
 tamper-evident append-only hash chain (:mod:`secugent.audit.hash_chain`).
 
-Design (see ``docs/specs/2026-06-06-stage4-gh2-audit-retention.md``):
+Design:
 
 * :func:`plan` is a **pure** function — given ``now``, the set of sealed days,
   and ``retain_days`` it computes which sealed days are past the retention floor

@@ -4,7 +4,7 @@
 SKT's A.X family is served behind an OpenAI-compatible gateway in on-prem /
 sovereign deployments, so this adapter reuses the shared OpenAI-compatible
 request/response handling and only declares its own vendor identity for
-redacted diagnostics (§A-2.3 model-neutral core).
+redacted diagnostics (model-neutral core).
 """
 
 from __future__ import annotations

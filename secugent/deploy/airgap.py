@@ -109,7 +109,7 @@ def _normalize_path(raw: str) -> str:
     Strips a leading ``./`` and collapses ``\\`` to ``/`` so ``./a/b`` and
     ``a\\b`` map to the same entry. Rejects absolute paths and ``..`` traversal
     fail-fast — a bundle path must never escape the bundle root (path-injection
-    guard, §B-7).
+    guard).
     """
     candidate = raw.replace("\\", "/").strip()
     while candidate.startswith("./"):

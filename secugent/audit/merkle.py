@@ -17,7 +17,7 @@ The runtime path:
    :class:`LocalHmacKmsProvider` uses HMAC-SHA256 keyed by ``key_id``.
    Production swaps in AWS KMS / Vault Transit (``secugent.enterprise.kms``).
 3. The signed bundle :class:`SignedMerkleRoot` is what gets pushed to the
-   external object-lock S3 store (out of scope for PHASE 12 — we only need
+   external object-lock S3 store (out of scope here — we only need
    to verify the cryptography).
 """
 
@@ -161,7 +161,7 @@ class MerkleSigner:
 
 
 # ---------------------------------------------------------------------------
-# G-H3 — boot settings + factory (selects Local HMAC vs external Vault Transit)
+# boot settings + factory (selects Local HMAC vs external Vault Transit)
 # ---------------------------------------------------------------------------
 
 
@@ -175,7 +175,7 @@ _DEV_HMAC_KEY: Final[bytes] = b"secugent-dev-merkle-signing-key-0001"
 
 
 class KmsSettings(BaseModel):
-    """Operator-facing KMS configuration for the daily Merkle signer (G-H3 + B5).
+    """Operator-facing KMS configuration for the daily Merkle signer.
 
     ``provider="vault_transit"`` selects the Enterprise
     :class:`secugent.enterprise.kms.VaultTransitProvider` (BSL-1.1, lazily
@@ -186,7 +186,7 @@ class KmsSettings(BaseModel):
     CryptoKeyVersion resource name). Any unrecognised value selects the dev-only
     :class:`LocalHmacKmsProvider`.
 
-    ``require_external=True`` (B5 prod guard): refuses provider='local' (the dev
+    ``require_external=True`` (prod guard): refuses provider='local' (the dev
     HMAC key) at build time — production must use an external KMS.
     """
 
@@ -200,7 +200,7 @@ class KmsSettings(BaseModel):
     local_hmac_key: SecretStr | None = None
     # AWS KMS region (required when provider='aws_kms').
     kms_region: str | None = None
-    # B5 prod guard: refuse the dev HMAC (provider='local') when True.
+    # prod guard: refuse the dev HMAC (provider='local') when True.
     # Set SECUGENT_KMS_REQUIRE_EXTERNAL=true in production to enforce this.
     require_external: bool = False
 
@@ -213,7 +213,7 @@ class KmsSettings(BaseModel):
         Unset / unrecognised ⇒ ``local``.
 
         ``SECUGENT_KMS_REQUIRE_EXTERNAL=true`` (case-insensitive) activates the
-        B5 prod guard: building with provider='local' will raise ``ValueError``.
+        Prod guard: building with provider='local' will raise ``ValueError``.
         """
         env = os.environ if environ is None else environ
         raw_provider = env.get("SECUGENT_KMS_PROVIDER", "").strip().lower()
@@ -228,7 +228,7 @@ class KmsSettings(BaseModel):
             "yes",
             "on",
         }
-        # C3-② (W8) drift note: this keys on the EXPLICIT "production" string, which
+        # drift note: this keys on the EXPLICIT "production" string, which
         # is intentionally NARROWER than the canonical dev predicate
         # ``secugent.api.env.is_dev_env`` (whose inverse ``not is_dev_env`` treats any
         # non-"dev" value — incl. unset/"staging" — as production). Auto-enforcing the
@@ -237,7 +237,7 @@ class KmsSettings(BaseModel):
         # signer build. Explicit SECUGENT_KMS_REQUIRE_EXTERNAL always overrides. A
         # future security pass may tighten this to deny-by-default (not is_dev_env).
         is_production = env.get("SECUGENT_ENV", "").strip().lower() == "production"
-        # B5 prod guard (defense in depth): auto-enforce require_external when
+        # prod guard (defense in depth): auto-enforce require_external when
         # SECUGENT_ENV=production so that a deployment with provider=local fails
         # at boot rather than silently signing Merkle roots with the hardcoded
         # dev HMAC key. Priority: explicit SECUGENT_KMS_REQUIRE_EXTERNAL > auto-
@@ -262,7 +262,7 @@ class KmsSettings(BaseModel):
 
 
 def build_kms_provider(settings: KmsSettings) -> KmsProvider:
-    """Select the KMS provider for the Merkle signer (G-H3 + B5).
+    """Select the KMS provider for the Merkle signer.
 
     * ``provider="vault_transit"`` → Enterprise
       :class:`~secugent.enterprise.kms.VaultTransitProvider` (lazy import; the
@@ -276,9 +276,9 @@ def build_kms_provider(settings: KmsSettings) -> KmsProvider:
       ``key_id`` must be the full GCP CryptoKeyVersion resource name.
     * ``provider="local"`` → :class:`LocalHmacKmsProvider` with ``key_id``
       registered. This is the dev-only HMAC signer — **refused when
-      ``settings.require_external=True``** (B5 prod guard).
+      ``settings.require_external=True``** (prod guard).
 
-    **B5 prod guard**: when ``settings.require_external`` is ``True``, this
+    **Prod guard**: when ``settings.require_external`` is ``True``, this
     function raises ``ValueError`` on ``provider='local'`` — the dev HMAC key
     must never be used in production. Allowed external providers:
     vault_transit / aws_kms / gcp_kms.
@@ -286,7 +286,7 @@ def build_kms_provider(settings: KmsSettings) -> KmsProvider:
     All returns conform to the :class:`KmsProvider` Protocol; the integration
     step can build ``MerkleSigner(kms=provider, key_id=...)`` directly.
     """
-    # B5 prod guard: refuse the dev HMAC in production (fail-closed).
+    # prod guard: refuse the dev HMAC in production (fail-closed).
     if settings.require_external and settings.provider == "local":
         raise ValueError(
             "KmsSettings.require_external=True forbids provider='local' (the dev HMAC key). "

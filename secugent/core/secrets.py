@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Secrets management (PHASE 9; G-H13 boot factory).
+"""Secrets management (boot factory).
 
 Four backends + one facade + one boot factory:
 
@@ -8,10 +8,10 @@ Four backends + one facade + one boot factory:
   backend (fail-closed; see the class docstring for the failure model). Requires
   the ``vault`` extra (``pip install 'secugent[vault]'``).
 * :class:`AwsSecretsManagerBackend` — **fully implemented** AWS Secrets Manager
-  backend (S8a / G-M7; fail-closed, same model as Vault — see the class
-  docstring). Requires the ``aws`` extra (``pip install 'secugent[aws]'``).
+  backend (fail-closed, same model as Vault — see the class docstring).
+  Requires the ``aws`` extra (``pip install 'secugent[aws]'``).
 * :class:`GcpSecretManagerBackend` — **fully implemented** GCP Secret Manager
-  backend (B7; fail-closed, same model as AWS — see the class docstring). Auth
+  backend (fail-closed, same model as AWS — see the class docstring). Auth
   via Application Default Credentials / Workload Identity; static key files are
   never accepted. Requires the ``gcp`` extra
   (``pip install 'secugent[gcp]'``).
@@ -28,11 +28,11 @@ step calls: it selects :class:`VaultSecretsBackend` when Vault is configured
 :class:`AwsSecretsManagerBackend` when ``AWS_SECRETS_REGION`` is set, else
 :class:`EnvSecretsBackend`. When Vault IS configured but unreachable / the auth
 is rejected it raises :class:`VaultBackendError` — it NEVER silently falls back
-to plaintext env (fail-closed, SECURITY_CONTRACT §6). ANY TWO of {Vault, AWS,
+to plaintext env (fail-closed). ANY TWO of {Vault, AWS,
 GCP} configured simultaneously raises ``ValueError`` (ambiguous secret plane,
 fail-closed).
 
-Per :data:`SECURITY_CONTRACT.md` §6 the secrets are wrapped in
+Secrets must never surface in logs or reprs: they are wrapped in
 :class:`pydantic.SecretStr` so they redact on ``repr()``/``str()`` and stay
 out of structured logs (see ``logger.redact``).
 """
@@ -83,7 +83,7 @@ class VaultBackendError(RuntimeError):
     transport/permission failure must fail *closed*. If it were collapsed into
     "secret not found", a caller's ``except SecretNotFoundError`` could fall back
     to a permissive default while Vault is merely unreachable — a fail-*open*
-    hole (SECURITY_CONTRACT §6). The type split keeps the two cases distinct.
+    hole. The type split keeps the two cases distinct.
     """
 
 
@@ -101,7 +101,7 @@ class SecretRevokedError(VaultBackendError):
 
 
 class AwsSecretsBackendError(RuntimeError):
-    """Raised when the AWS Secrets Manager backend itself fails (S8a / G-M7).
+    """Raised when the AWS Secrets Manager backend itself fails.
 
     Covers AccessDenied, decryption failure, throttling, and any transport /
     availability error. Deliberately **not** a
@@ -109,14 +109,14 @@ class AwsSecretsBackendError(RuntimeError):
     :class:`VaultBackendError`: a permission/transport failure must fail *closed*.
     If it collapsed into "secret not found", a caller's
     ``except SecretNotFoundError`` could fall back to a permissive default while
-    AWS is merely throttling or denying access — a fail-*open* hole
-    (SECURITY_CONTRACT §6). Only AWS ``ResourceNotFoundException`` (the secret /
+    AWS is merely throttling or denying access — a fail-*open* hole.
+    Only AWS ``ResourceNotFoundException`` (the secret /
     version genuinely does not exist) maps to :class:`SecretNotFoundError`.
     """
 
 
 class GcpSecretsBackendError(RuntimeError):
-    """Raised when the GCP Secret Manager backend itself fails (B7).
+    """Raised when the GCP Secret Manager backend itself fails.
 
     Covers PermissionDenied, transport failure, throttling, missing credentials,
     and decryption errors. Deliberately **not** a
@@ -124,8 +124,8 @@ class GcpSecretsBackendError(RuntimeError):
     :class:`AwsSecretsBackendError`: a permission/transport failure must fail
     *closed*. If it collapsed into "secret not found", a caller's
     ``except SecretNotFoundError`` could fall back to a permissive default while
-    GCP is merely throttling or denying access — a fail-*open* hole
-    (SECURITY_CONTRACT §6). Only ``google.api_core.exceptions.NotFound`` (the
+    GCP is merely throttling or denying access — a fail-*open* hole.
+    Only ``google.api_core.exceptions.NotFound`` (the
     secret / version genuinely does not exist) maps to
     :class:`SecretNotFoundError`.
     """
@@ -255,7 +255,7 @@ class VaultSecretsBackend(SecretsBackend):
                     "hvac is required for VaultSecretsBackend — install it with: "
                     "pip install 'secugent[vault]'"
                 ) from exc
-            # hvac has no type stubs; the client is intentionally Any (§B-3 waiver).
+            # hvac has no type stubs; the client is intentionally Any (typing waiver).
             self._client = hvac.Client(
                 url=vault_addr,
                 token=vault_token,
@@ -400,7 +400,7 @@ def _select_secret_field(
 
     ``from None`` on :class:`json.JSONDecodeError`: a JSONDecodeError message
     echoes a snippet of the offending input — i.e. the SECRET material — so it
-    must never be chained as ``__cause__`` (SECURITY_CONTRACT §6). Only the
+    must never be chained as ``__cause__``. Only the
     backend name, SecretId, and caller-supplied field name (not secret material)
     are surfaced.
     """
@@ -460,7 +460,7 @@ def _gcp_is_not_found(exc: BaseException) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# GCP Secret Manager backend (B7 / Workload Identity — fully implemented, fail-closed)
+# GCP Secret Manager backend (Workload Identity — fully implemented, fail-closed)
 # ---------------------------------------------------------------------------
 
 _GCP_DEFAULT_VERSION: Final[str] = "latest"
@@ -479,14 +479,13 @@ class _GcpSecretManagerClient(Protocol):
 
 
 class GcpSecretManagerBackend(SecretsBackend):
-    """GCP Secret Manager backend (B7) — fully implemented, fail-closed.
+    """GCP Secret Manager backend — fully implemented, fail-closed.
 
     Install with ``pip install 'secugent[gcp]'``. Auth via Application Default
     Credentials (ADC); on GKE this resolves to Workload Identity automatically.
     A static key file / service-account JSON is **never** accepted — operators
     must provision ADC (Workload Identity or ``gcloud auth application-default
-    login`` for local dev) so credentials rotate without a redeploy
-    (SECURITY_CONTRACT §6).
+    login`` for local dev) so credentials rotate without a redeploy.
 
     Secrets are addressed by their short secret_id (NOT the full resource path);
     an optional ``"#field"`` selects one key inside a JSON payload (e.g.
@@ -520,8 +519,8 @@ class GcpSecretManagerBackend(SecretsBackend):
     transport error with no structured code fails CLOSED. Only the secret_id + exception *type name* are surfaced in errors —
     never the upstream message body (which can echo IAM tokens or secret
     material) — and ``from None`` drops the cause so chained-traceback rendering
-    (logging.exception / Sentry / uncaught propagation) cannot leak it
-    (SECURITY_CONTRACT §6). Every value handed back is wrapped in
+    (logging.exception / Sentry / uncaught propagation) cannot leak it.
+    Every value handed back is wrapped in
     :class:`pydantic.SecretStr` so it redacts on ``repr()``/log.
     """
 
@@ -546,7 +545,7 @@ class GcpSecretManagerBackend(SecretsBackend):
         try:
             # google.cloud.secretmanager has no bundled type stubs; absent stubs
             # are already covered by `ignore_missing_imports = true` in
-            # pyproject.toml [tool.mypy] (§B-3 waiver; mirrors the boto3 pattern
+            # pyproject.toml [tool.mypy] (typing waiver; mirrors the boto3 pattern
             # in AwsSecretsManagerBackend._secretsmanager).
             from google.cloud import secretmanager
         except ImportError as exc:
@@ -601,7 +600,7 @@ class GcpSecretManagerBackend(SecretsBackend):
             # the upstream message body, which can echo IAM tokens or secret
             # material). ``from None`` drops the cause so chained-traceback
             # rendering (logging.exception / Sentry / uncaught propagation)
-            # cannot leak it (SECURITY_CONTRACT §6).
+            # cannot leak it.
             raise GcpSecretsBackendError(
                 f"GCP Secret Manager read failed for '{secret_id}': {exc_type_name}"
             ) from None
@@ -619,7 +618,7 @@ class GcpSecretManagerBackend(SecretsBackend):
         except UnicodeDecodeError:
             # ``from None``: UnicodeDecodeError.reason echoes the offending
             # byte sequence and position — not secret material per se, but
-            # erring on the side of §6 minimal disclosure.
+            # erring on the side of minimal disclosure.
             raise SecretNotFoundError(
                 f"GCP secret '{secret_id}' payload is not valid UTF-8 text "
                 "(binary-only secrets are unsupported)"
@@ -683,7 +682,7 @@ def _aws_error_code(exc: BaseException) -> str | None:
 
 
 class AwsSecretsManagerBackend(SecretsBackend):
-    """AWS Secrets Manager backend (S8a / G-M7) — fully implemented, fail-closed.
+    """AWS Secrets Manager backend — fully implemented, fail-closed.
 
     Install with ``pip install 'secugent[aws]'``. Secrets are addressed by their
     AWS ``SecretId`` (name or ARN); an optional ``"#field"`` selects one key
@@ -709,7 +708,7 @@ class AwsSecretsManagerBackend(SecretsBackend):
     structured code falls CLOSED. Only the ``SecretId`` + exception *type name*
     are surfaced in errors — never the upstream message body (which can echo
     token/ciphertext material) — and ``from None`` drops the cause so chained
-    traceback rendering cannot leak it (SECURITY_CONTRACT §6). Every value handed
+    traceback rendering cannot leak it. Every value handed
     back is wrapped in :class:`pydantic.SecretStr` so it redacts on ``repr()``/log.
     """
 
@@ -757,8 +756,8 @@ class AwsSecretsManagerBackend(SecretsBackend):
 
         Delegates to the module-level :func:`_select_secret_field` with
         ``backend_name="AWS"`` so both AWS and GCP share the same
-        JSON-field-selection contract (SECURITY_CONTRACT §6: ``from None`` on
-        decode, never echo secret material in the error).
+        JSON-field-selection contract (``from None`` on decode, never echo
+        secret material in the error).
         """
         return _select_secret_field(secret_string, field_name, secret_id, backend_name="AWS")
 
@@ -800,7 +799,7 @@ class AwsSecretsManagerBackend(SecretsBackend):
             # code when present) — never the upstream message body, which could
             # echo token/ciphertext material. ``from None`` drops the cause so a
             # chained-traceback render (logging.exception / Sentry / uncaught
-            # propagation) cannot leak it (SECURITY_CONTRACT §6).
+            # propagation) cannot leak it.
             detail = code or exc_type_name
             raise AwsSecretsBackendError(
                 f"AWS Secrets Manager read failed for '{secret_id}': {detail}"
@@ -911,12 +910,12 @@ class SecretsManager:
 
 
 # ---------------------------------------------------------------------------
-# G-H13 + S8a — boot settings + factory (selects Vault / AWS / Env, fail-closed)
+# boot settings + factory (selects Vault / AWS / Env, fail-closed)
 # ---------------------------------------------------------------------------
 
 
 class SecretsSettings(BaseModel):
-    """Operator-facing secrets configuration (G-H13; S8a AWS branch).
+    """Operator-facing secrets configuration.
 
     Read from the environment by :meth:`from_env`. ``vault_addr`` plus EITHER a
     token (``VAULT_TOKEN``) OR an AppRole pair (``VAULT_ROLE_ID`` +
@@ -925,7 +924,7 @@ class SecretsSettings(BaseModel):
     be silently downgraded to the plaintext :class:`EnvSecretsBackend`.
 
     ``aws_secrets_region`` (``AWS_SECRETS_REGION``) means "use AWS Secrets
-    Manager" (S8a / G-M7). Vault and AWS configured *simultaneously* is an
+    Manager". Vault and AWS configured *simultaneously* is an
     ambiguous config the factory rejects (fail-closed) — a human must say which
     secret plane is authoritative.
     """
@@ -940,11 +939,11 @@ class SecretsSettings(BaseModel):
     vault_namespace: str | None = None
     vault_mount_point: str = "secret"
     vault_timeout_seconds: int = 5
-    # S8a (G-M7) — AWS Secrets Manager. A region is the explicit opt-in (no
+    # AWS Secrets Manager. A region is the explicit opt-in (no
     # implicit AWS_REGION fallback): operators must name the secret plane.
     aws_secrets_region: str | None = None
     aws_secrets_endpoint_url: str | None = None
-    # B7 — GCP Secret Manager. A project id is the explicit opt-in (no implicit
+    # GCP Secret Manager. A project id is the explicit opt-in (no implicit
     # GOOGLE_CLOUD_PROJECT fallback): operators must name the secret plane. Auth
     # via Application Default Credentials (never a static key file).
     gcp_secrets_project: str | None = None
@@ -1018,7 +1017,7 @@ def _build_approle_client(settings: SecretsSettings) -> Any:
     A login that is unreachable / rejected (403, bad secret-id, sealed) raises
     :class:`VaultBackendError` — never a fall-through to plaintext env. Only the
     exception *type name* is surfaced; the upstream message (which can echo the
-    secret-id) is dropped with ``from None`` (SECURITY_CONTRACT §6).
+    secret-id) is dropped with ``from None``.
     """
     try:
         import hvac
@@ -1030,7 +1029,7 @@ def _build_approle_client(settings: SecretsSettings) -> Any:
     assert settings.vault_addr is not None  # guarded by vault_configured
     assert settings.vault_role_id is not None  # guarded by caller
     assert settings.vault_secret_id is not None  # guarded by caller
-    # hvac has no type stubs; the client is intentionally Any (§B-3 waiver).
+    # hvac has no type stubs; the client is intentionally Any (typing waiver).
     client: Any = hvac.Client(
         url=settings.vault_addr,
         namespace=settings.vault_namespace,
@@ -1055,7 +1054,7 @@ def _build_approle_client(settings: SecretsSettings) -> Any:
 
 
 def build_secrets_backend(settings: SecretsSettings) -> SecretsBackend:
-    """Select the secrets backend for the running app (G-H13 + S8a + B7, fail-closed).
+    """Select the secrets backend for the running app (fail-closed).
 
     * ANY TWO of {Vault, AWS, GCP} configured simultaneously → ``ValueError``
       (ambiguous secret plane — fail-closed, a human must choose exactly one).
@@ -1063,9 +1062,8 @@ def build_secrets_backend(settings: SecretsSettings) -> SecretsBackend:
       (token mode takes precedence over AppRole when both are set).
     * VAULT_ADDR set but no auth → ``ValueError`` (misconfig, never plaintext).
     * GCP configured (``GCP_SECRETS_PROJECT``) → :class:`GcpSecretManagerBackend`
-      (B7; auth via ADC / Workload Identity).
-    * AWS configured (``AWS_SECRETS_REGION``) → :class:`AwsSecretsManagerBackend`
-      (S8a / G-M7).
+      (auth via ADC / Workload Identity).
+    * AWS configured (``AWS_SECRETS_REGION``) → :class:`AwsSecretsManagerBackend`.
     * Otherwise → the plaintext :class:`EnvSecretsBackend`.
 
     A configured Vault that is unreachable / rejected raises

@@ -132,7 +132,7 @@ def log_decision_gate(
 ) -> None:
     """Emit a decision-gate record on the parallel structlog stream (D3-RR-01).
 
-    A thin, **fail-soft** producer for the §C-2 decision choke points (the SDK
+    A thin, **fail-soft** producer for the decision-gate choke points (the SDK
     gate and the SUB agent). It exists so the 6-field JSONL stream — empty until
     now — is populated alongside (never replacing) the durable audit emit.
 
@@ -147,8 +147,8 @@ def log_decision_gate(
     * **Never breaks the caller (INV-4).** A logging-layer failure (stream gone,
       serialisation error) is swallowed: a decision/run must never fail because a
       *parallel observability* emit raised. This is a deliberate, scoped
-      ``except`` (§B-8 fail-soft for a pure side-effect), not silent error
-      hiding — the durable §C-2 audit chain is the source of truth and is emitted
+      ``except`` (fail-soft for a pure side-effect), not silent error
+      hiding — the durable audit chain is the source of truth and is emitted
       independently.
 
     ``extra`` MUST carry only structural fields (``gate`` / ``decision`` / axis
@@ -170,7 +170,7 @@ def log_decision_gate(
             **extra,
         )
     except Exception:  # noqa: BLE001 - fail-soft: a parallel log must never break the run (INV-4)
-        # Best-effort: the durable §C-2 audit emit is independent and authoritative.
+        # Best-effort: the durable audit emit is independent and authoritative.
         # We intentionally do not re-raise; observability is a side-effect here.
         return
 

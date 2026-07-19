@@ -4,8 +4,8 @@
 These types are the *single source of truth* for the data exchanged between
 HEAD/SUB agents, Mechanical Oversight, RISKANALYZER, the approval service, and
 the durable event store. Validation here is intentionally strict — any module
-producing one of these objects must satisfy fail-closed expectations from
-SECURITY_CONTRACT.md §3.
+producing one of these objects must satisfy fail-closed validation
+expectations.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class Risk(BaseModel):
     severity: Literal["low", "medium", "high", "critical"] = "medium"
 
 
-# §C-1 AI 식별표시 / 한국 AI 기본법 워터마크: the single standardized,
+# AI 식별표시 / 한국 AI 기본법 워터마크: the single standardized,
 # Korean-default identification marker attached to any AI free-text output that is
 # surfaced to a human operator. It is fastened at the orchestrator/runner boundary
 # (NOT inside ``core.llm_client`` — that SDK wrapper stays framework/model-neutral).
@@ -179,7 +179,7 @@ class Plan(BaseModel):
     regulations_version: str = Field(default="0.0.0", min_length=1, max_length=64)
 
 
-# §C-2 ``rule_of_two_axes`` canonical tokens. These MUST stay byte-for-byte equal
+# ``rule_of_two_axes`` canonical audit tokens. These MUST stay byte-for-byte equal
 # to ``secugent.core.rule_of_two.Axis`` values (``untrusted_input`` /
 # ``sensitive_access`` / ``external_comm``). That module imports from THIS one
 # (``ActionType``/``Step``), so importing ``Axis`` here would create a cycle — the
@@ -204,14 +204,14 @@ class ApprovalScope(BaseModel):
     # execution must present the same envelope fingerprint (else fail-closed) —
     # an approval for envelope A cannot authorize envelope B. None ⇒ legacy/unbound.
     envelope_hash: str | None = None
-    # §C-2 ``rule_of_two_axes``: the Rule of Two axes (§A-2.1) that the
+    # ``rule_of_two_axes``: the Rule of Two axes that the
     # steps this scope covers trip, computed deterministically at approval-creation
     # time from ``rule_of_two.axes_for_steps`` over the scoped plan steps. Frozen
     # (INV-M4-2): the axis set that justified a HITL approval is fixed once the
     # token is minted — it can never be mutated after issuance. Sorted &
     # de-duplicated by the validator so the same axis set always serializes
     # identically. Read back verbatim by the HITL approve/reject emitters so the
-    # §C-2 audit row carries the real axes (not a dead ``[]`` fill).
+    # audit row carries the real axes (not a dead ``[]`` fill).
     rule_of_two_axes: tuple[str, ...] = Field(default=(), frozen=True)
 
     @field_validator("rule_of_two_axes")

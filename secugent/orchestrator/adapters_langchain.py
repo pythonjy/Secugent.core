@@ -113,7 +113,7 @@ class _OversightHandlerMixin:
        ``BaseCallbackHandler.raise_error`` defaults to ``False``. Without an
        explicit opt-in, langchain would **swallow** our HARD BLOCK / forced-HITL
        exception, log 'Error in callback', and run the violating tool anyway — a
-       complete bypass of the REGULATIONS HARD BLOCK at the embed boundary (§4.8).
+       complete bypass of the REGULATIONS HARD BLOCK at the embed boundary.
        We therefore set :data:`raise_error` ``= True`` (here and on the
        dynamically-built handler class) so langchain re-raises the gate's verdict
        and the tool never executes. Callers MUST NOT re-wrap the handler with
@@ -144,7 +144,7 @@ def SecuGentCallbackHandler(*, gate: OversightGate, action_type: ActionType = "c
     """Construct a LangChain ``BaseCallbackHandler`` that gates tool calls (lazy).
 
     Presented as a class-like factory (capitalised) so callers write
-    ``SecuGentCallbackHandler(gate=...)`` exactly as the §4.5 contract shows. The
+    ``SecuGentCallbackHandler(gate=...)`` exactly as the embed contract shows. The
     langchain base class is imported here (I3); absent langchain, this raises a
     clear ``ImportError`` with the ``pip install secugent[langchain]`` hint.
 
@@ -163,7 +163,7 @@ def SecuGentCallbackHandler(*, gate: OversightGate, action_type: ActionType = "c
             # Belt-and-braces: set raise_error=True directly on the concrete class
             # too (the mixin already sets it, and is first in the MRO so it wins),
             # so that even if a future langchain base re-declares raise_error the
-            # handler still opts in to re-raise — never fail open (§4.8).
+            # handler still opts in to re-raise — never fail open.
             "raise_error": True,
         },
     )

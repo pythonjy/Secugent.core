@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LangChain demo — wrap a LangChain-style tool in SecuGent oversight (BDP_02 item 4).
+"""LangChain demo — wrap a LangChain-style tool in SecuGent oversight (embed SDK).
 
-Shows the OEM/embed premise (§A-2.3 framework-neutral): an SI/vendor wraps THEIR
+Shows the OEM/embed premise (framework-neutral): an SI/vendor wraps THEIR
 existing LangChain tool with the SecuGent embed SDK so a policy-violating tool call
 is deterministically HARD BLOCKed before it runs — no API key, no network.
 
@@ -54,7 +54,7 @@ _RUN = "run_langchain_demo"
 
 
 class _ConsoleSink:
-    """Prints each §C-2 decision-gate event the gate emits (audit visibility)."""
+    """Prints each decision-gate audit event the gate emits (audit visibility)."""
 
     def emit(self, event: dict[str, object]) -> None:
         print(f"[langchain_demo] 감사 이벤트: gate={event['gate']} decision={event['decision']}")
@@ -144,11 +144,11 @@ def _demo_compliant_passes(gate: OversightGate) -> bool:
 
 
 def _demo_durable_audit_chain() -> bool:
-    """Wire the production §C-2 sink: a tamper-evident ChainedEventStore.
+    """Wire the production audit sink: a tamper-evident ChainedEventStore.
 
     Shows that SDK-emitted decision-gate events land in the durable, append-only
     hash chain (``verify_chain``) — not just a volatile in-memory sink — which is
-    what C-1/C-2 require for 6-month, immutable, tamper-evident audit records.
+    what the compliance requirements demand for 6-month, immutable, tamper-evident audit records.
     """
     regulations = load_regulations_from_dict(
         {"version": "langchain-demo-1.0.0", "banned_paths": []},

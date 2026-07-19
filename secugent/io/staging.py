@@ -8,7 +8,7 @@ a synchronous HITL approval, AND (b) the hold window having elapsed. During the
 hold window STEER can recall it (abort) — "catch it before it is sent". Every
 state change is recorded on the durable hash chain.
 
-G-M6: adds :class:`SQLiteStagedEffectStore` — a SQLite-backed store that
+Adds :class:`SQLiteStagedEffectStore` — a SQLite-backed store that
 survives process restart (invariant I-E). ``StagedEffectStore`` (in-memory) is
 kept as a test-time or explicit-fallback option; the production boot path uses
 the durable store.
@@ -46,7 +46,7 @@ __all__ = [
     "StagingAuditSink",
 ]
 
-# DDL for the durable staging table (G-M6).
+# DDL for the durable staging table.
 _DDL = """
 CREATE TABLE IF NOT EXISTS staged_effects (
     id               TEXT PRIMARY KEY,
@@ -72,7 +72,7 @@ _SELECT_COLS = (
 
 class StageState(StrEnum):
     STAGED = "staged"
-    COMMITTING = "committing"  # transient: CAS-claimed by one committer (SG-20260624-02)
+    COMMITTING = "committing"  # transient: CAS-claimed by one committer
     COMMITTED = "committed"
     ABORTED = "aborted"
 
@@ -104,14 +104,14 @@ class StagedEffect:
     hold_until: datetime
     compensating_action: str | None = None
     state: StageState = StageState.STAGED
-    # SG-20260624-04: when the effect was staged (UTC). Surfaced by the outbox API
+    # when the effect was staged (UTC). Surfaced by the outbox API
     # as the operator-facing ``created_at`` instead of approximating it from
     # ``hold_until``. None for legacy rows / in-memory stages without a clock.
     created_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
-# Serialization helpers (G-M6)
+# Serialization helpers
 # ---------------------------------------------------------------------------
 
 
@@ -191,7 +191,7 @@ def _json_to_req(raw: str) -> EgressRequest:
 class StagedEffectStore:
     """Holds staged irreversible effects in memory until committed or aborted.
 
-    For production use, prefer :class:`SQLiteStagedEffectStore` (G-M6 durable).
+    For production use, prefer :class:`SQLiteStagedEffectStore` (durable).
     This class is retained for tests and as an explicit fallback path where
     durability is not required.
     """
@@ -313,19 +313,19 @@ class StagedEffectStore:
 
 
 # ---------------------------------------------------------------------------
-# G-M6: Durable SQLite-backed store
+# Durable SQLite-backed store
 # ---------------------------------------------------------------------------
 
 
 class SQLiteStagedEffectStore:
-    """SQLite-backed staging store that survives process restart (G-M6, I-E).
+    """SQLite-backed staging store that survives process restart (I-E).
 
     The store keeps a local in-memory cache of rows it has loaded/written so
     hot paths do not require a DB round-trip. The cache is refreshed lazily by
     ``get()`` (DB always authoritative). The DB is the single source of truth;
     in-memory state is never committed ahead of the DB write (fail-closed, I-A).
 
-    Thread safety (SG-20260624-02): the connection runs with
+    Thread safety: the connection runs with
     ``check_same_thread=False`` so it may be shared by the async commit endpoint's
     worker threads. A process-level :class:`threading.RLock` serializes the
     in-process write critical sections, and ``commit`` additionally performs an
@@ -349,7 +349,7 @@ class SQLiteStagedEffectStore:
         self._conn.commit()
         # Serializes in-process write critical sections (commit/abort/stage) so
         # concurrent threads sharing one store instance cannot interleave a
-        # CAS-claim with another transition (SG-20260624-02).
+        # CAS-claim with another transition.
         self._lock = threading.RLock()
         # In-memory cache keyed by staged_id.
         self._cache: dict[str, StagedEffect] = {}
@@ -464,7 +464,7 @@ class SQLiteStagedEffectStore:
         transport: Transport,
         audit: StagingAuditSink | None = None,
     ) -> EgressResult:
-        # SG-20260624-02: gate checks + an atomic CAS state pre-claim run under the
+        # gate checks + an atomic CAS state pre-claim run under the
         # process lock so two concurrent commits on the same staged_id cannot both
         # pass into the transport (double-send of an irreversible effect, I-C/I-D).
         # Only the thread whose UPDATE claimed the 'staged'→'committing' transition
@@ -508,7 +508,7 @@ class SQLiteStagedEffectStore:
         )
 
     def _claim_for_commit(self, staged_id: str) -> bool:
-        """Atomically claim a STAGED effect for commit (CAS, SG-20260624-02).
+        """Atomically claim a STAGED effect for commit (CAS).
 
         Returns True iff this call transitioned the row staged→committing (i.e.
         ``rowcount == 1``); a concurrent winner or a non-STAGED row yields False.
@@ -534,7 +534,7 @@ class SQLiteStagedEffectStore:
         if the audit write fails the effect is still marked as aborted in the
         durable store (the transport is never called in the aborted path).
         """
-        # SG-20260624-02: abort shares the commit lock so a recall cannot race a
+        # abort shares the commit lock so a recall cannot race a
         # commit's CAS claim (abort only fires from the STAGED state — once a
         # committer has claimed 'committing', _require_staged refuses the abort).
         with self._lock:
@@ -590,7 +590,7 @@ class SQLiteStagedEffectStore:
         # UTC-aware only if the ISO string included timezone offset).
         if hold_until.tzinfo is None:
             hold_until = hold_until.replace(tzinfo=UTC)
-        # SG-20260624-04: load the real creation timestamp (legacy rows may lack it).
+        # load the real creation timestamp (legacy rows may lack it).
         created_at: datetime | None = None
         if created_at_iso is not None:
             created_at = datetime.fromisoformat(created_at_iso)

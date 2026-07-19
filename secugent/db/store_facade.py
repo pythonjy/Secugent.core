@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 store-selection seam + synchronous bridge over the async PG store.
+"""Store-selection seam + synchronous bridge over the async PG store.
 
-The live request handlers (``api/main.py`` ``post_command`` etc.) are ``async
-def`` but call the durable store **synchronously** —
-``state_.store.upsert_run(run)`` / ``state_.store.append_event(event)`` — because
-the reference store (:class:`secugent.core.event_store.EventStore`, SQLite) is
-sync. The production store (:class:`secugent.core.event_store_pg.PgEventStore`)
+The live request handlers are ``async def`` but call the durable store
+**synchronously** — ``state_.store.upsert_run(run)`` /
+``state_.store.append_event(event)`` — because the reference store
+(:class:`secugent.core.event_store.EventStore`, SQLite) is sync. The
+production store (:class:`secugent.core.event_store_pg.PgEventStore`)
 is **async**. A backend swap therefore cannot be a drop-in.
 
 This module provides:
@@ -96,8 +96,8 @@ class _RawAppendable(Protocol):
 class SyncPgEventStore:
     """Synchronous facade over an async PG chained store, on a dedicated loop.
 
-    The wrapped store's single-writer fence (DA-C1 INV-C1-4) and tenant
-    second-guard (DA-M2) live in :class:`PgEventStore`, so every write through
+    The wrapped store's single-writer fence (INV-C1-4) and tenant
+    second-guard live in :class:`PgEventStore`, so every write through
     this bridge is fenced and tenant-bound without the bridge re-deciding policy
     (single source of truth, §A).
     """
@@ -158,13 +158,13 @@ class SyncPgEventStore:
 
 class AsyncLiveStore:
     """Backend-neutral ASYNC durable-store facade for the live (``async def``)
-    request/audit/STEER handlers (DA-C1 B3 — the staged successor to
+    request/audit/STEER handlers (the staged successor to
     :class:`SyncPgEventStore`).
 
     The handlers are already ``async def`` but drive the durable store
     *synchronously* today (``state_.store.append_event(...)``) because the SQLite
     reference store is sync. This facade lets a handler ``await`` the store
-    directly, so the eventual PG cutover does NOT serialise the uvicorn loop on a
+    directly, so the eventual PG cutover does NOT serialise the event loop on a
     cross-thread bridge (the honest-caveat path documented on
     :class:`SyncPgEventStore`): the PG branch awaits the async store on the loop.
 
@@ -174,19 +174,19 @@ class AsyncLiveStore:
       SAME cached :class:`ChainedEventStore` and its ``inner`` :class:`EventStore`.
       No thread offload, no re-ordering — each ``async def`` here just wraps the
       identical sync call the handler makes today, so the determinism path and the
-      event ORDER are byte-identical (CLAUDE.md §B "행동·순서 동일"). The §C-2
-      hash chain stays the single cached decorator (one chain over one DB file).
+      event ORDER are byte-identical. The §C-2 hash chain stays the single cached
+      decorator (one chain over one DB file).
     * ``backend="postgres"``: ``await`` the async :class:`PgChainedEventStore`
-      (which already carries RLS + the DA-M2 tenant second-guard + the DA-C1
-      single-writer fence). New behaviour lives ONLY on this branch — so the
-      determinism pin, which never traverses the live path, is unaffected.
+      (which already carries RLS + the tenant second-guard + the single-writer
+      fence). New behaviour lives ONLY on this branch — so the determinism pin,
+      which never traverses the live path, is unaffected.
 
     NOTE (spec refinement): the SQLite branch takes a :class:`ChainedEventStore`
-    (not a bare :class:`EventStore` as the B3 sketch typed it) so that
-    ``append_chained``/``verify_chain`` reuse the SINGLE cached audit chain
-    (SECURITY_CONTRACT §10.1 — one decorator over one DB file) instead of forking
-    a second chain; raw reads/writes go through its ``inner`` store. The read
-    methods carry ``tenant_id`` because the PG branch needs it for RLS.
+    (not a bare :class:`EventStore`) so that ``append_chained``/``verify_chain``
+    reuse the SINGLE cached audit chain (SECURITY_CONTRACT §10.1 — one decorator
+    over one DB file) instead of forking a second chain; raw reads/writes go
+    through its ``inner`` store. The read methods carry ``tenant_id`` because the
+    PG branch needs it for RLS.
 
     fail-closed: constructing a backend with its store absent raises; a wrong-
     backend store is never silently substituted (INV-C1-3).
@@ -306,7 +306,7 @@ def select_live_store(
     sqlite_store: LiveWriteStore,
     pg_bridge_factory: Callable[[], LiveWriteStore],
 ) -> tuple[LiveWriteStore, str]:
-    """Pick the live durable write store from config (DA-C1 seam).
+    """Pick the live durable write store from config (store-selection seam).
 
     Pure and side-effect free except for ``pg_bridge_factory()`` (called only on
     the PG branch). Returns ``(store, backend_name)`` where ``backend_name`` is

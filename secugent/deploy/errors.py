@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Domain exceptions for the air-gap deploy package (BDP_04 항목 13).
+"""Domain exceptions for the air-gap deploy package.
 
 A single :class:`AirgapError` root so callers (``bundle.sh`` driver, install
 verifier, CI) can ``except AirgapError`` and fail closed on any reproducibility /

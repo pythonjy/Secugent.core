@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``OversightMiddleware`` + ``wrap_tool`` — per-request / per-tool embed surface.
 
-BDP_02 item 4 (§4.5/§4.8). Both apply the **same** core oversight gate
+Both apply the **same** core oversight gate
 (:class:`~secugent.sdk.gate.OversightGate`) as ``@require_oversight`` — there is
 no second control implementation and, critically, **no execution path that
 reaches the wrapped app/tool without first passing the gate** (the §4.8 boundary

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SecuGent embed SDK — wrap your existing agents/tools in SecuGent oversight.
 
-BDP_02 item 4. This is the **framework-neutral** public embed surface (§A-2.3):
+This is the **framework-neutral** public embed surface (§A-2.3):
 SI/vendors wrap their existing agents/tools so every action passes the SecuGent
 trust loop (REGULATIONS deny-by-default → Rule of Two → forced HITL → §C-2 audit)
 *without* SecuGent owning their agent runtime — the OEM/licensing premise.

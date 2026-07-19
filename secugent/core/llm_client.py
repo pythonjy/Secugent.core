@@ -439,7 +439,7 @@ def get_default_client() -> LLMClient:
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     domestic_endpoint = os.environ.get("SECUGENT_DOMESTIC_MODEL_ENDPOINT", "").strip()
-    # DA-C2 / INV-C2-1: the dev/prod decision is made by the ONE shared decider
+    # INV-C2-1: the dev/prod decision is made by the ONE shared decider
     # (:func:`secugent.core.env.is_dev_env`, also re-exported as
     # ``secugent.api.env.is_dev_env``) — no private copy of the literal. The default
     # is fail-closed: an UNSET/blank ``SECUGENT_ENV`` is production, so a prod box
@@ -462,9 +462,9 @@ def get_default_client() -> LLMClient:
 
     if domestic_endpoint:
         # Domestic model endpoint configured → honour it.
-        # BDP_02 item 10: when a concrete sovereign model is selected via
-        # SECUGENT_DOMESTIC_MODEL, build the real adapter (prod AND dev) so
-        # closed-network/sovereign deployments get a real model — never a Mock.
+        # When a concrete sovereign model is selected via SECUGENT_DOMESTIC_MODEL,
+        # build the real adapter (prod AND dev) so closed-network/sovereign
+        # deployments get a real model — never a Mock.
         # The registry is imported lazily here so importing this module never
         # pulls the concrete adapters (model-neutral core isolation, §A-2.3).
         domestic_model = os.environ.get("SECUGENT_DOMESTIC_MODEL", "").strip()

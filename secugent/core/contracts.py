@@ -143,12 +143,12 @@ class Risk(BaseModel):
     severity: Literal["low", "medium", "high", "critical"] = "medium"
 
 
-# DA-H2 (§C-1 AI 식별표시 / 한국 AI 기본법 워터마크): the single standardized,
+# §C-1 AI 식별표시 / 한국 AI 기본법 워터마크: the single standardized,
 # Korean-default identification marker attached to any AI free-text output that is
 # surfaced to a human operator. It is fastened at the orchestrator/runner boundary
-# (NOT inside ``core.llm_client`` — that SDK wrapper stays framework/model-neutral,
-# INV-H2-3). It is a module-level constant, so it introduces no wall-clock/uuid and
-# is byte-stable across runs (INV-H2-4 determinism).
+# (NOT inside ``core.llm_client`` — that SDK wrapper stays framework/model-neutral).
+# It is a module-level constant, so it introduces no wall-clock/uuid and is
+# byte-stable across runs (determinism invariant).
 AI_GENERATED_MARKER = "AI 생성: 본 산출물은 AI가 생성했습니다."
 
 
@@ -165,13 +165,13 @@ class Plan(BaseModel):
     risks: list[Risk] = Field(default_factory=list)
     assigned_subs: dict[str, str] = Field(default_factory=dict)  # step_id -> sub actor
     approval_id: str | None = None
-    # DA-H2: immutable provenance proving this plan is an AI-generated artifact.
+    # Immutable provenance proving this plan is an AI-generated artifact.
     # ``ai_generated`` is ``Literal[True]`` and ``frozen`` so a forged ``False`` is
-    # *unrepresentable* (INV-H2-2) — the value can never be flipped after construction.
+    # *unrepresentable* — the value can never be flipped after construction.
     # ``model_id`` / ``regulations_version`` are stamped by :meth:`HeadAgent.plan`
     # from the resolved planner model and the active REGULATIONS version. They are
     # deterministic, wall-clock-free constants/derived strings — NO ``generated_at``
-    # timestamp enters the contract, preserving the determinism digest (INV-H2-4).
+    # timestamp enters the contract, preserving the determinism digest.
     # Defaults keep legacy/test ``Plan(...)`` construction backward compatible; the
     # planner always overwrites them with real values.
     ai_generated: Literal[True] = Field(default=True, frozen=True)
@@ -204,7 +204,7 @@ class ApprovalScope(BaseModel):
     # execution must present the same envelope fingerprint (else fail-closed) —
     # an approval for envelope A cannot authorize envelope B. None ⇒ legacy/unbound.
     envelope_hash: str | None = None
-    # DA-M4 (§C-2 ``rule_of_two_axes``): the Rule of Two axes (§A-2.1) that the
+    # §C-2 ``rule_of_two_axes``: the Rule of Two axes (§A-2.1) that the
     # steps this scope covers trip, computed deterministically at approval-creation
     # time from ``rule_of_two.axes_for_steps`` over the scoped plan steps. Frozen
     # (INV-M4-2): the axis set that justified a HITL approval is fixed once the

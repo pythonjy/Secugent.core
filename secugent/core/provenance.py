@@ -3,7 +3,7 @@
 
 Axis① (``untrusted_input``) of the Rule of Two used to require an **explicit**
 declaration on ``Step.context``; it had no live producer (the deferred
-"Stage 6 / G-C4" note in :mod:`secugent.core.rule_of_two`). This module is that
+provenance-producer note in :mod:`secugent.core.rule_of_two`). This module is that
 live producer: it turns *data-flow provenance* — where a step's input came from —
 into a deterministic taint bit, so a step whose input derives from an untrusted
 source (a web fetch, a connector response, an untrusted file, or a prior tainted
@@ -28,9 +28,9 @@ Only :attr:`TaintSource.USER_DIRECT` is trusted; every other source is untrusted
 The string values are wire-stable because provenance metadata is JSON-serialized
 into ``Step.context``.
 
-G-C4 (2026-06-13): :func:`taint_source_for_action` is the new deterministic
-action-type → taint-source mapping used by ``HeadAgent._parse_plan`` to
-automatically inject provenance taint from plan structure. See
+:func:`taint_source_for_action` is the deterministic action-type → taint-source
+mapping used by ``HeadAgent._parse_plan`` to automatically inject provenance
+taint from plan structure. See
 ``docs/specs/2026-06-13-gc4-axis1-live-provenance.md`` for the full design
 rationale (§A-2 근거).
 """
@@ -109,7 +109,7 @@ def taint_source_for_action(
     action_type: ActionType,
     context: Mapping[str, object],
 ) -> TaintSource | None:
-    """Deterministic action-type → taint-source mapping (G-C4, §A-2.1 Rule-of-Two).
+    """Deterministic action-type → taint-source mapping (§A-2.1 Rule-of-Two).
 
     Returns the :class:`TaintSource` that a step with the given ``action_type``
     should carry for axis① (``untrusted_input``), or ``None`` if the action is

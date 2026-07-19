@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``secugent rotate-secret <name>`` — honest secret-rotation wrapper (DA-H6).
+"""``secugent rotate-secret <name>`` — honest secret-rotation wrapper.
 
 This is a *thin, honest* wrapper over :meth:`SecretsManager.rotate` — it never
 fakes success. The three backends have genuinely different rotation realities,
@@ -85,7 +85,7 @@ def run_rotate_secret(*, name: str) -> int:
 def _parse_args(rest: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="secugent rotate-secret",
-        description="Rotate a secret via the configured backend, honestly (DA-H6).",
+        description="Rotate a secret via the configured backend, honestly.",
     )
     parser.add_argument("name", help="Secret name/path to rotate.")
     return parser.parse_args(rest)

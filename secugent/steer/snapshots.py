@@ -6,7 +6,7 @@ rolled back this way. Irreversible effects are caught pre-commit by staging
 (``io.staging``); compensatable effects are handled by issuing a compensating
 action (``steer.precommit.compensate``).
 
-G-C3 추가: ``SnapshotRef``, ``RunCheckpoint``, ``DurableSnapshotStore`` Protocol,
+추가 구성요소: ``SnapshotRef``, ``RunCheckpoint``, ``DurableSnapshotStore`` Protocol,
 ``SQLiteCheckpointStore`` — 정지 시 런 컨텍스트를 SQLite에 영속하고 재개 시 복원한다.
 D-C 결정: run_checkpoints(checkpoint_id PK, run_id, tenant_id, blob JSON, created_at).
 D-E 결정: patch_remaining_ttl(잔여 TTL 초)을 동결 — expires_at 절대값이 아님.
@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# G-C3 신규: SnapshotRef (frozen, INV-SNAP-1)
+# SnapshotRef (frozen, INV-SNAP-1)
 # ---------------------------------------------------------------------------
 
 
@@ -52,7 +52,7 @@ class SnapshotRef:
 
 
 # ---------------------------------------------------------------------------
-# G-C3 신규: RunCheckpoint (정지 시 컨텍스트 전체 스냅샷)
+# RunCheckpoint (정지 시 컨텍스트 전체 스냅샷)
 # ---------------------------------------------------------------------------
 
 
@@ -92,7 +92,7 @@ class RunCheckpoint:
 
 
 # ---------------------------------------------------------------------------
-# G-C3 신규: DurableSnapshotStore Protocol
+# DurableSnapshotStore Protocol
 # ---------------------------------------------------------------------------
 
 
@@ -117,7 +117,7 @@ class DurableSnapshotStore(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# G-C3 신규: SQLiteCheckpointStore (D-C)
+# SQLiteCheckpointStore (D-C)
 # ---------------------------------------------------------------------------
 
 _CHECKPOINT_SCHEMA = """

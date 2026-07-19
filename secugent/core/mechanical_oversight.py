@@ -252,7 +252,7 @@ class OversightEngine:
         # ``evaluate_effect``). None ⇒ deny-by-default for the effect surface; the
         # legacy ``evaluate(step)`` path is unaffected either way.
         self._compiled_policy = compiled_policy
-        # G-C3 additive: pause 신호 상태 (INV-R6: contextvar 절대 금지 — 명시 전달)
+        # STEER 추가: pause 신호 상태 (INV-R6: contextvar 절대 금지 — 명시 전달)
         # 이 필드는 _patches_lock으로 보호되며 copy-on-write가 아니라 단순 bool/str.
         # 스레드 경계에서 소실되는 contextvar 방식을 절대 쓰지 않는다.
         self._pause_active: bool = False
@@ -295,7 +295,7 @@ class OversightEngine:
             self._patches = [*self._patches, patch]
 
     # ------------------------------------------------------------------ #
-    # G-C3: Pause 신호 API (INV-R6 — contextvar 절대 금지)
+    # STEER Pause 신호 API (INV-R6 — contextvar 절대 금지)
     # ------------------------------------------------------------------ #
 
     def set_paused(

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — SAP connector (ERP 전표·구매요청 등 회사코드·트랜잭션 통제).
+"""SAP connector (ERP 전표·구매요청 등 회사코드·트랜잭션 통제).
 
 Same shape as :mod:`secugent.tools.connectors.jira`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a

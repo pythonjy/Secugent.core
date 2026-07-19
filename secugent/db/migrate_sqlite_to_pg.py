@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 — append-only SQLite→PG migration with hash-chain re-verification.
+"""Append-only SQLite→PG migration with hash-chain re-verification.
 
 Copies the durable run + §C-2 hash-chained event history from the SQLite
 reference store into PostgreSQL **in chain order**, then re-verifies the chain on

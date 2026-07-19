@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""N1 (갭 ① — P2, §A-3 P2-4) — read-only retrieval (source-search) connector.
+"""Read-only retrieval (source-search) connector (P2, §A-3 P2-4).
 
 Wraps an *external* RAG/search endpoint (사내 데이터팀 파이프라인·벡터DB 게이트웨이·
 Glean류) in the existing :class:`~secugent.tools.connectors.base.Connector`

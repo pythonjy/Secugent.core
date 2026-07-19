@@ -50,7 +50,7 @@ class RunLease:
 
 @dataclass(frozen=True)
 class LeaderLease:
-    """A DURABLE per-worker leader lease (DA-C1 B2 — the live single-writer fence).
+    """A DURABLE per-worker leader lease (the live single-writer fence, INV-C1-4).
 
     Unlike the session-scoped ``pg_advisory_lock`` (which rides a pooled
     connection that is RETURNED to the pool, so it is NOT durably held for the

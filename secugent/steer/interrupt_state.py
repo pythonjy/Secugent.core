@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C3 STEER 인터럽트 상태기계.
+"""STEER 인터럽트 상태기계.
 
 §3 D-A 결정: umbrella RunState는 항상 EXECUTING을 유지한다.
 interrupt_state는 RunRecord에 additive 필드로 붙는 별도 enum이다.
@@ -30,7 +30,7 @@ __all__ = [
 
 
 class InterruptState(StrEnum):
-    """G-C3 인터럽트 세부 상태.
+    """인터럽트 세부 상태.
 
     umbrella RunState(EXECUTING)와 별도로 관리된다 (D-A).
     """

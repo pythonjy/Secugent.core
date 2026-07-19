@@ -8,7 +8,7 @@ Subcommands (all over a durable ``--db`` proposal store):
 * ``approve`` — record a 4-eyes admin approval (REUSES ``ProposalRepository`` —
   proposer ≠ approver, role=admin, MFA enforced by the deterministic core).
 * ``open-pr`` — open a GitHub PR **only after 2 DISTINCT admin approvers** have
-  approved (NO AUTO-APPLY, CLAUDE.md §A-1 / SECURITY_CONTRACT §10.2/§10.6).
+  approved (NO AUTO-APPLY, §A-1 / SECURITY_CONTRACT §10.2/§10.6).
   ``--dry-run`` (the DEFAULT, per §7 "EVOLUTION은 --dry-run 기본") uses
   :class:`MockGitProvider` and never touches the network.
 

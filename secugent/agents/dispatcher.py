@@ -122,7 +122,7 @@ class Dispatcher:
         # before any worker starts (state-diagram invariant 1).
         self._sanity_check_approval(plan, approval)
 
-        # DA-H4 (W5-c, Finding 1) — partial approval EXECUTION enforcement.
+        # Partial approval execution enforcement.
         # The approval scope authorises EXACTLY ``scope.step_ids``; for a partial
         # Plan Review approval that is a strict SUBSET of ``plan.steps``. The
         # dispatcher must dispatch ONLY that approved subset — a deferred

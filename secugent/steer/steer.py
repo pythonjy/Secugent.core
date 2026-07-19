@@ -92,7 +92,7 @@ class SteerOutcome:
 
 @dataclass(frozen=True)
 class SteerResumeEvent:
-    """G-C3 D-D §8.3: Structured payload of the second steer.resumed producer.
+    """Structured payload of the second steer.resumed producer.
 
     Emitted when an actual PAUSED→RUNNING transition occurs (i.e. when
     resume_from_checkpoint clears the engine pause). Distinguishable from the
@@ -237,7 +237,7 @@ class SteerHandler:
         actor: str,
         rule_of_two_axes: list[str] | None = None,
     ) -> SteerResumeEvent:
-        """G-C3 D-D §8.3: Emit the SECOND steer.resumed producer.
+        """Emit the SECOND steer.resumed producer.
 
         This is a structurally distinct producer from the cosmetic steer.resumed
         in :meth:`apply`. It fires when an actual PAUSED→RUNNING transition occurs

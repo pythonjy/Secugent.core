@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic Rule of Two 3-axis isolation engine (§A-2 architecture rule 1).
 
-Rule of Two (CLAUDE.md §A-2.1): in a single task/session, at most **two** of the
+Rule of Two (§A-2.1): in a single task/session, at most **two** of the
 following three axes may be active without human review; if all three are needed,
 HITL is **forced**:
 
@@ -36,7 +36,7 @@ Design choices (deny-by-default, conservative):
   type alone cannot tell us whether its input is trusted, so it is never inferred
   from ``action_type`` — only from declared provenance / an explicit flag.
 
-.. note:: Axis ① provenance auto-derivation (BDP_02 항목 5).
+.. note:: Axis ① provenance auto-derivation.
 
    Axis ① (``untrusted_input``) has a **deterministic provenance reader**:
    :meth:`RuleOfTwoContext.from_step` reads a ``provenance`` block from
@@ -49,7 +49,7 @@ Design choices (deny-by-default, conservative):
    an inherited taint off), and a ``provenance`` block in BOTH the flat and nested
    locations is OR-combined (neither can clear the other's taint).
 
-   **Live producer status (G-C4, 2026-06-13):** ``HeadAgent._parse_plan`` now
+   **Live producer status (2026-06-13):** ``HeadAgent._parse_plan`` now
    calls ``taint_source_for_action`` after each ``Step`` is constructed and wires
    the result into ``mark_untrusted_source``. ``http_get`` and
    ``connector_action`` steps automatically activate axis① with no explicit flag.
@@ -122,7 +122,7 @@ class RuleOfTwoContext:
         Axis ① (``untrusted_input``) is the OR of two deterministic sources:
 
         * an **explicit** boolean ``True`` declaration, and
-        * a **provenance-derived** taint (BDP_02 항목 5): a ``provenance`` block
+        * a **provenance-derived** taint: a ``provenance`` block
           naming an untrusted :class:`~secugent.core.provenance.TaintSource` (or a
           parent that was already tainted) auto-activates axis ① via
           :func:`~secugent.core.provenance.derive_taint`.
@@ -271,7 +271,7 @@ def axes_to_audit(axes: frozenset[Axis]) -> list[str]:
 def axes_for_steps(steps: Iterable[Step]) -> tuple[str, ...]:
     """Sorted, de-duplicated §C-2 axis tokens for the union of axes over ``steps``.
 
-    DA-M4: the value :class:`~secugent.core.contracts.ApprovalScope` stamps into
+    The value :class:`~secugent.core.contracts.ApprovalScope` stamps into
     its immutable ``rule_of_two_axes`` field at approval-creation time. It is the
     union of :func:`classify_axes` over each step (each combined with its own
     deterministic, provenance-derived :class:`RuleOfTwoContext` via

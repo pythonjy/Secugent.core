@@ -131,7 +131,7 @@ COST_QUOTA_UTILIZATION = Gauge(
 
 
 # ---------------------------------------------------------------------------
-# BDP_02 item 7 — opt-in adoption telemetry is intentionally NOT a Prometheus
+# Opt-in adoption telemetry is intentionally NOT a Prometheus
 # metric. It lives entirely in-memory / sink-only in
 # ``secugent.observability.telemetry.TelemetryCollector`` (default-off). A
 # global Prometheus counter would (a) auto-register on the default REGISTRY at

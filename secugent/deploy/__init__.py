@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Air-gap / on-prem deployment hardening (BDP_04 항목 13).
+"""Air-gap / on-prem deployment hardening.
 
 Pure, infra-free logic that backs the deploy artifacts:
 
@@ -10,5 +10,5 @@ Pure, infra-free logic that backs the deploy artifacts:
 
 Importing this package pulls in **no** optional dependency (boto3/hvac/cosign):
 those are install-time / shell-time tooling, not Python runtime imports
-(CLAUDE.md §A — framework/model neutral, closed-network first).
+(framework/model neutral, closed-network first).
 """

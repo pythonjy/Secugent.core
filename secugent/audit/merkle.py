@@ -6,7 +6,7 @@ Core tier (Apache-2.0). This module holds the :class:`KmsProvider` Protocol
 The production external-KMS *implementations* (``AwsKmsProvider`` /
 ``VaultTransitProvider``) are Enterprise (BSL-1.1) and live in
 ``secugent.enterprise.kms`` so Core/audit never ships BSL-licensed code
-(open-core boundary, BDP_01 item 1). Core depends only on the Protocol, never
+(open-core boundary). Core depends only on the Protocol, never
 on the Enterprise impls (dependency-inversion at the boundary).
 
 The runtime path:
@@ -305,7 +305,10 @@ def build_kms_provider(settings: KmsSettings) -> KmsProvider:
         from secugent.enterprise.kms import VaultTransitProvider
 
         token = settings.vault_token.get_secret_value() if settings.vault_token is not None else None
-        return VaultTransitProvider(url=settings.vault_addr, token=token)
+        # Explicit KmsProvider annotation: the Enterprise provider class is absent in
+        # the open-core tree (Any under ignore_missing_imports); assert the boundary type.
+        provider: KmsProvider = VaultTransitProvider(url=settings.vault_addr, token=token)
+        return provider
 
     if settings.provider == "aws_kms":
         if not settings.kms_region:
@@ -317,14 +320,16 @@ def build_kms_provider(settings: KmsSettings) -> KmsProvider:
         # Lazy, call-time import (open-core boundary I2).
         from secugent.enterprise.kms import AwsKmsProvider
 
-        return AwsKmsProvider(region=settings.kms_region)
+        aws_provider: KmsProvider = AwsKmsProvider(region=settings.kms_region)
+        return aws_provider
 
     if settings.provider == "gcp_kms":
         # Lazy, call-time import (open-core boundary I2).
         # key_id carries the full GCP CryptoKeyVersion resource name.
         from secugent.enterprise.kms import GcpKmsProvider
 
-        return GcpKmsProvider()
+        gcp_provider: KmsProvider = GcpKmsProvider()
+        return gcp_provider
 
     local = LocalHmacKmsProvider()
     key_bytes = (

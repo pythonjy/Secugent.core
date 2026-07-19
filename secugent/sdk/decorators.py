@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``@require_oversight`` — wrap any callable so its action passes SecuGent oversight.
 
-BDP_02 item 4 (§4.5). Decorating a sync OR async callable makes every invocation,
+Decorating a sync OR async callable makes every invocation,
 *before* the wrapped body runs:
 
 1. build the :class:`~secugent.core.contracts.Step` this call represents,

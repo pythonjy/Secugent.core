@@ -510,7 +510,7 @@ def _default_root(version: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Korean policy packs (BDP_02 항목 6) — YAML pack loading + strengthen-only merge
+# Korean policy packs — YAML pack loading + strengthen-only merge
 # --------------------------------------------------------------------------- #
 #
 # A *pack* is a ready-to-apply REGULATIONS template shipped under

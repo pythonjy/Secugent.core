@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — groupware connector (사내 그룹웨어: 메신저·공지·전자결재 알림).
+"""Groupware connector (사내 그룹웨어: 메신저·공지·전자결재 알림).
 
 Same shape as :mod:`secugent.tools.connectors.slack`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a

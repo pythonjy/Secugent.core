@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``secugent migrate-store`` — SQLite→PG audit-chain migration (DA-C1).
+"""``secugent migrate-store`` — SQLite→PG audit-chain migration.
 
 Copies the append-only run + hash-chained event history from the SQLite
 reference store into PostgreSQL **in order**, then re-verifies the hash chain on
@@ -40,7 +40,7 @@ __all__ = ["main"]
 def _parse_args(rest: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="secugent migrate-store",
-        description="Migrate the append-only audit chain from SQLite to PostgreSQL (DA-C1).",
+        description="Migrate the append-only audit chain from SQLite to PostgreSQL.",
     )
     parser.add_argument(
         "--sqlite",

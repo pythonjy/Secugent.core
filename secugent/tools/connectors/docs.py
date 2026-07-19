@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — document-management connector (사내 문서함·전자결재 문서).
+"""Document-management connector (사내 문서함·전자결재 문서).
 
 Same shape as :mod:`secugent.tools.connectors.notion`: a duck-typed
 :class:`~secugent.tools.connectors.base.Connector` whose ``validate_action`` is a

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``secugent backup`` — atomic, lock-safe snapshot of the audit store (DA-H6).
+"""``secugent backup`` — atomic, lock-safe snapshot of the audit store.
 
 Uses the SQLite *online backup API* (:meth:`sqlite3.Connection.backup`) rather
 than a raw file copy, so a consistent snapshot — including any in-flight WAL
@@ -98,7 +98,7 @@ def run_backup(*, db_path: Path, out_path: Path, overwrite: bool) -> int:
 def _parse_args(rest: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="secugent backup",
-        description="Atomic, lock-safe SQLite snapshot of the audit store (DA-H6).",
+        description="Atomic, lock-safe SQLite snapshot of the audit store.",
     )
     parser.add_argument(
         "--db",

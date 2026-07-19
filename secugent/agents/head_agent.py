@@ -94,8 +94,8 @@ class HeadAgent:
         self._max_attempts = max_attempts
         self._approval_ttl = approval_ttl_seconds
         self._system_prompt = load_prompt("head_planner")
-        # DA-H2: resolver for the active REGULATIONS version stamped onto every
-        # Plan's provenance. Injected by the API boot wiring as
+        # Resolver for the active REGULATIONS version stamped onto every
+        # Plan's provenance. Injected by the boot wiring as
         # ``lambda: state_.active_regulations_version`` so the live OversightEngine
         # version is read at plan() time. ``None`` ⇒ the safe ``"0.0.0"`` fallback
         # (dev/test), matching ``state_.active_regulations_version``'s own fallback.
@@ -220,7 +220,7 @@ class HeadAgent:
                 "plan contains 'connector_action' — Rule of Two axis ③, "
                 "must hit step-scoped HITL (cannot be pre-approved at plan level)"
             )
-        # G-C2: generalize the connector_action guard to the full Rule of Two
+        # Generalize the connector_action guard to the full Rule of Two
         # (§A-2.1). Any approved step that trips all three axes (untrusted input +
         # sensitive access + external comm) can never be pre-approved at the plan
         # level — it must pass a fresh, step-scoped HITL. Surface a domain error
@@ -230,7 +230,7 @@ class HeadAgent:
         # Axis ① (untrusted_input) is auto-derived from a ``provenance`` block (see
         # ``mark_untrusted_source``) by ``RuleOfTwoContext.from_step``, so this guard
         # catches provenance-tainted 3-axis steps too — not only explicitly-declared
-        # ones. G-C4 (2026-06-13): ``taint_source_for_action`` is now called from
+        # ones. ``taint_source_for_action`` is now called from
         # ``_parse_plan`` so every http_get/connector_action step produced by the
         # planner automatically carries a provenance block — the deferral is resolved.
         rule_of_two_step_ids = sorted(
@@ -254,7 +254,7 @@ class HeadAgent:
             # EM-08: bind the approval to the minimal envelope the run will run
             # inside; the SubAgent re-verifies this hash on consume.
             envelope_hash=envelope_hash,
-            # DA-M4 (§C-2 rule_of_two_axes): stamp the Rule of Two axes the
+            # Stamp the Rule of Two axes (§C-2 rule_of_two_axes) the
             # approved steps collectively trip, computed deterministically over the
             # union of their provenance-aware classifications. Frozen at issuance —
             # the HITL approve/reject emitters read this back verbatim so the audit
@@ -289,7 +289,7 @@ class HeadAgent:
         return self.plan(HeadPlanRequest(run_id=plan.run_id, goal=new_goal))
 
     # ------------------------------------------------------------------ #
-    # Provenance marking (Rule of Two axis① live producer — BDP_02 항목 5)
+    # Provenance marking (Rule of Two axis① live producer)
     # ------------------------------------------------------------------ #
 
     @staticmethod
@@ -314,7 +314,7 @@ class HeadAgent:
         this top-level mark, because the core now OR-combines both locations
         (deterministic — the producer cannot lower a taint the control plane sees).
 
-        .. note:: Live wiring (G-C4, 2026-06-13).
+        .. note:: Live wiring (2026-06-13).
 
            ``_parse_plan`` now calls :func:`~secugent.core.provenance.taint_source_for_action`
            immediately after constructing each :class:`~secugent.core.contracts.Step` and
@@ -345,7 +345,7 @@ class HeadAgent:
     def mark_derived_from(child: Step, parent: Step) -> Step:
         """Return a copy of ``child`` that inherits ``parent``'s resolved taint.
 
-        This is the **propagation producer** for axis ① (§A-2.1, BDP_02 항목 5): when
+        This is the **propagation producer** for axis ① (§A-2.1): when
         a plan step's input is *derived from* a prior step's output, the child must
         carry the parent's taint forward. The parent's resolved taint is computed
         via the single core classifier (:meth:`RuleOfTwoContext.from_step`) — so an
@@ -373,7 +373,7 @@ class HeadAgent:
     # ------------------------------------------------------------------ #
 
     def _active_regulations_version(self) -> str:
-        """Resolve the active REGULATIONS version for DA-H2 plan provenance.
+        """Resolve the active REGULATIONS version for plan provenance.
 
         Returns the injected provider's value (the live ``OversightEngine``
         version via ``state_.active_regulations_version``) or the safe ``"0.0.0"``
@@ -453,7 +453,7 @@ class HeadAgent:
                 )
             except (KeyError, ValidationError) as exc:
                 raise ValueError(f"invalid step: {exc}") from exc
-            # G-C4 live producer: deterministically inject axis① provenance from
+            # Live producer: deterministically inject axis① provenance from
             # action_type. http_get and connector_action steps automatically
             # activate axis① via the Rule-of-Two reader. file_read activates axis①
             # only when an explicit untrusted_file=true flag is present (flat or
@@ -486,7 +486,7 @@ class HeadAgent:
             steps=steps,
             risks=risks,
             assigned_subs=assigned,
-            # DA-H2: stamp immutable AI-generated provenance from the resolved
+            # Stamp immutable AI-generated provenance from the resolved
             # planner model + active REGULATIONS version. Deterministic (no
             # wall-clock); ``ai_generated`` defaults to the frozen ``True``.
             model_id=self._model,

@@ -82,7 +82,7 @@ class RunRecord:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     state_history: list[tuple[RunState, datetime]] = field(default_factory=list)
-    # G-C3 D-A: STEER interrupt sub-state. The umbrella RunState stays EXECUTING;
+    # STEER interrupt sub-state. The umbrella RunState stays EXECUTING;
     # this field tracks fine-grained interrupt lifecycle (INTERRUPT_REQUESTED →
     # PAUSING → PAUSED_SNAPSHOTTED → RESUMING → RUNNING, etc.).
     # Stored via context["_extras"]["interrupt_state"] in both backends so no
@@ -441,7 +441,7 @@ def _row_to_record(row: tuple[Any, ...]) -> RunRecord:
         finished_at=datetime.fromisoformat(row[8]) if row[8] else None,
         state_history=_history_from_json(row[9]),
     )
-    # G-C3 D-A: restore interrupt_state from context["_extras"] (no extra SQL column).
+    # Restore interrupt_state from context["_extras"] (no extra SQL column).
     _restore_extras_to_record(rec)
     return rec
 
@@ -464,7 +464,7 @@ def _clone_record(rec: RunRecord) -> RunRecord:
 
 
 def _restore_extras_to_record(rec: RunRecord) -> None:
-    """G-C3 D-A: After deserialisation from SQLite/memory, lift _extras fields
+    """After deserialisation from SQLite/memory, lift _extras fields
     back onto their typed RunRecord attributes.
 
     interrupt_state is stored in context["_extras"]["interrupt_state"] (not as a

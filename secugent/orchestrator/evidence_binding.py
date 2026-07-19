@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""N3 (갭 ④) — connector/tool payload → validated :class:`Evidence` (fail-closed).
+"""Connector/tool payload → validated :class:`Evidence` (fail-closed).
 
 A **pure boundary module** (no I/O, no global state, no wall clock): it re-admits
 the ``evidence`` list a retrieval connector/MCP tool put on its ``ConnectorResult``

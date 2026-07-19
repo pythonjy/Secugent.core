@@ -159,7 +159,7 @@ class _RateLimitedConnector:
 
     The four PHASE-11 connectors (slack/notion/jira + base) each carried an
     identical ``_take_rate_token`` body. Rather than copy it a fifth/sixth/seventh
-    time for the BDP_04 §14d connectors (groupware/SAP/docs), they inherit this
+    time for the extended connectors (groupware/SAP/docs), they inherit this
     mixin (§B-6: extract on the 3rd repetition). It is intentionally NOT retrofitted
     onto the existing connectors here — that would be an unrelated refactor of code
     outside this item's scope — so behaviour is byte-identical to ``slack.py``.

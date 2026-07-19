@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Key-less, air-gap-first ``secugent demo`` (BDP Phase 1 item 3).
+"""Key-less, air-gap-first ``secugent demo``.
 
 Runs one self-contained round of the SecuGent trust loop with **no API key and
 no network** (§A-2.6 폐쇄망 우선):
@@ -64,7 +64,7 @@ __all__ = [
 ]
 
 # The §C-2 decision-gate log schema field set. Kept here so the demo's audit
-# view stays in lock-step with CLAUDE.md §C-2 (a test asserts every field).
+# view stays in lock-step with the §C-2 audit schema (a test asserts every field).
 C2_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "event_id",
@@ -99,7 +99,7 @@ _FIXED_EXPIRY = datetime(2099, 1, 1, 0, 0, 0, tzinfo=_KST)
 class DemoAuditEvent:
     """A §C-2-shaped decision-gate audit record (JSON-serialisable, frozen).
 
-    Field-for-field a CLAUDE.md §C-2 log entry. ``prev_event_id`` links each
+    Field-for-field a §C-2 audit log entry. ``prev_event_id`` links each
     event to its predecessor (the genesis event's is ``None``), forming the
     immutable chain that the durable :class:`ChainedEventStore` independently
     hashes — so the human-readable view and the cryptographic chain agree.

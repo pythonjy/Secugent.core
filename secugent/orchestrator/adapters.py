@@ -84,7 +84,7 @@ if TYPE_CHECKING:  # pragma: no cover
 _logger = logging.getLogger(__name__)
 
 
-# BDP_02 item 4: ``HeadPlannerAdapter`` / ``DispatcherAdapter`` are re-exported as
+# ``HeadPlannerAdapter`` / ``DispatcherAdapter`` are re-exported as
 # part of the public embed-SDK surface (``secugent.sdk``) so SI/vendors can wire the
 # real HEAD planner / Dispatcher behind the same oversight gate. This is a public
 # surface tidy-up only — no behavior change here; the re-export lives in
@@ -203,14 +203,14 @@ class HeadPlannerAdapter:
             summary=plan.goal,
             steps=list(plan.steps),
             raw=plan,
-            # DA-H2: carry the native Plan's AI-generated provenance forward so the
-            # runner surfaces it on ``/runs/{id}`` for the Plan Review UI (W5-c).
+            # Carry the native Plan's AI-generated provenance forward so the runner
+            # surfaces it on ``/runs/{id}`` for the Plan Review UI.
             ai_generated=plan.ai_generated,
             model_id=plan.model_id,
             regulations_version=plan.regulations_version,
-            # DA-H4 (W5-c a′): thread the HEAD-declared risks + step→sub mapping so
-            # the runner persists them for ``GET /api/plans/{id}`` (the Plan Review
-            # risk section + per-step assignment). Serialised to plain dicts here so
+            # Thread the HEAD-declared risks + step→sub mapping so the runner
+            # persists them for ``GET /api/plans/{id}`` (the Plan Review risk section
+            # + per-step assignment). Serialised to plain dicts here so
             # the runner stays free of the concrete ``Risk`` type.
             risks=[risk.model_dump(mode="json") for risk in plan.risks],
             assigned_subs=dict(plan.assigned_subs),
@@ -262,7 +262,7 @@ class DispatcherAdapter:
         # G-H4: when a directory-mode loader is wired, every dispatch resolves the
         # per-run effective REGULATIONS and builds a fresh per-run engine. When it
         # is ``None`` (file-mode / dev / explicit injection) the boot fallback
-        # engine — already fail-closed by G-C1 — is reused byte-for-byte.
+        # engine — already fail-closed — is reused byte-for-byte.
         self._regulations_loader = regulations_loader
         self._fallback_engine = fallback_engine
         # Optional STEER registry hook (option A): publish the per-run engine so a
@@ -302,8 +302,8 @@ class DispatcherAdapter:
         # label (CONFIDENTIAL) so the broker EnvelopeGate (EM-08 go-live) admits
         # in-plan effects rather than suspending them on a label mismatch.
         envelope = build_minimal_envelope(plan_native, max_data_label=DataLabel.CONFIDENTIAL)
-        # DA-H4: a partial Plan Review approval narrows the minted scope to the
-        # selected step subset; ``None`` ⇒ full plan (legacy behaviour unchanged).
+        # A partial Plan Review approval narrows the minted scope to the selected
+        # step subset; ``None`` ⇒ full plan (legacy behaviour unchanged).
         approval = self._issue_plan_approval(plan_native, envelope, approved_step_ids=approved_step_ids)
 
         # SG-20260603-01: compute the envelope fingerprint eagerly and thread it
@@ -465,7 +465,7 @@ class DispatcherAdapter:
 
         * No loader (file-mode / dev / explicit injection) → reuse the boot
           fallback engine and its version verbatim (byte-for-byte unchanged path,
-          spec invariant 6). The fallback is already fail-closed (G-C1).
+          spec invariant 6). The fallback is already fail-closed.
         * Loader present → ``for_run(run_id, tenant_id)`` resolves the effective
           (base + tenant override) bundle and a FRESH engine is built per dispatch.
           A missing tenant policy yields the (stricter) org base — acceptable.
@@ -499,9 +499,9 @@ class DispatcherAdapter:
         # check (status == 'approved'). The approval is bound to ``envelope``
         # (EM-08) so a substituted envelope at execution fails closed.
         #
-        # DA-H4 (W5-c): when ``approved_step_ids`` is supplied (a partial Plan
-        # Review approval), build a ``PartialApprovalResult`` so HeadAgent mints a
-        # scope bound to EXACTLY those step ids (and the real Rule of Two axes of
+        # When ``approved_step_ids`` is supplied (a partial Plan Review approval),
+        # build a ``PartialApprovalResult`` so HeadAgent mints a scope bound to
+        # EXACTLY those step ids (and the real Rule of Two axes of
         # that subset). Unselected steps are absent from the scope, so the core
         # ``_enforce_scope`` (UNCHANGED) rejects them at execution — fail-closed,
         # deny-by-default (INV-W5C-1 / INV-W5C-5). ``None`` ⇒ full plan approval.
@@ -557,9 +557,9 @@ def _result_to_dict(result: DispatcherResult) -> dict[str, Any]:
                         "actor": actor,
                         "step_id": o.step.id,
                         "payload": o.tool_result.payload,
-                        # DA-H2: every agent free-text output crossing this
-                        # orchestrator boundary toward an operator carries the
-                        # standardized Korean AI-identification marker. Attached
+                        # Every agent free-text output crossing this orchestrator
+                        # boundary toward an operator carries the standardized
+                        # Korean AI-identification marker. Attached
                         # here (NOT in ``core.llm_client``) so BYO-Model neutrality
                         # is preserved (INV-H2-3) — the marker is the caller's
                         # responsibility, never the SDK wrapper's.
@@ -578,8 +578,8 @@ def _result_to_dict(result: DispatcherResult) -> dict[str, Any]:
         "subs": subs,
         "partial_failure": partial,
         "failure_reason": failure_reason,
-        # DA-H2: aggregate AI-identification marker for the whole dispatch result
-        # so an operator surface that renders the result envelope (not just a
-        # single output) still shows the AI-generated notice.
+        # Aggregate AI-identification marker for the whole dispatch result so an
+        # operator surface that renders the result envelope (not just a single
+        # output) still shows the AI-generated notice.
         "ai_identification": AI_GENERATED_MARKER,
     }

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """LangChain oversight adapter — gate LangChain tool calls through SecuGent core.
 
-BDP_02 item 4 (§4.5/§4.6). :class:`SecuGentCallbackHandler` is a LangChain
+:class:`SecuGentCallbackHandler` is a LangChain
 ``BaseCallbackHandler`` whose ``on_tool_start`` runs the SecuGent oversight gate
 *before* a tool executes: a REGULATIONS violation HARD BLOCKs (raises) and a Rule
 of Two 3-axis tool forces HITL — via the SAME :class:`~secugent.sdk.gate.OversightGate`

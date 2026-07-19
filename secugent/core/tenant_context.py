@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 5B / G-C6 — request-path tenant binding.
+"""Request-path tenant binding.
 
 A single, reusable place to bind ``current_tenant`` from the authenticated
 :class:`~secugent.core.tenancy.Principal`. Every request handler / pipeline

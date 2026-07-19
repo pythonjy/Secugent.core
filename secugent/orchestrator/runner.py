@@ -133,7 +133,7 @@ class PlanLike:
     summary: str
     steps: list[Any]
     raw: Any = None  # the underlying Plan or compatible object
-    # DA-H2: AI-generated provenance threaded from the native Plan through the
+    # AI-generated provenance threaded from the native Plan through the
     # orchestrator abstraction so the runner can surface it on ``/runs/{id}``
     # without importing the concrete ``Plan`` type. Defaults mark any plan
     # honestly as AI-generated even when the upstream adapter (e.g. a resume
@@ -141,9 +141,9 @@ class PlanLike:
     ai_generated: bool = True
     model_id: str = "unknown"
     regulations_version: str = "0.0.0"
-    # DA-H4 (W5-c a′): the planner-declared potential risks and step→sub mapping,
-    # threaded as plain JSON-friendly structures (NOT concrete ``Risk``/``Plan``
-    # types, keeping the runner import-free of ``core.contracts``). Persisted onto
+    # The planner-declared potential risks and step→sub mapping, threaded as plain
+    # JSON-friendly structures (NOT concrete ``Risk``/``Plan`` types, keeping the
+    # runner import-free of ``core.contracts``). Persisted onto
     # the stored plan dict so ``GET /api/plans/{id}`` can render the HEAD risk
     # section + step assignment for the Plan Review screen. Empty defaults keep
     # legacy / stub planners that do not carry risks backward compatible.
@@ -163,7 +163,7 @@ class DispatcherProtocol(Protocol):
         plan: PlanLike,
         approved_step_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Execute ``plan``. ``approved_step_ids`` (DA-H4) narrows the minted
+        """Execute ``plan``. ``approved_step_ids`` narrows the minted
         plan-approval scope to a step subset (``None`` = full plan)."""
         ...
 
@@ -242,7 +242,7 @@ class ApprovalDecision:
     approver: str | None = None
     reason: str | None = None
     instruction: str | None = None  # amend only
-    # DA-H4 (W5-c): Plan Review partial approval. ``None`` ⇒ full plan approval
+    # Plan Review partial approval. ``None`` ⇒ full plan approval
     # (every step in scope — the legacy binary ``approve`` behaviour). A non-None
     # list narrows the dispatcher's minted ``ApprovalScope`` to EXACTLY these step
     # ids (deny-by-default: unselected steps are never authorized, INV-W5C-5). Only
@@ -277,7 +277,7 @@ class RunOrchestrator:
         self._store: RunStateStore = state_store or InMemoryRunStateStore()
         self._config = config or OrchestratorConfig()
         self._publish = publish_event or _noop_publish
-        # Optional HA single-leader lease (G-C8). ``None`` = single-node mode:
+        # Optional HA single-leader lease. ``None`` = single-node mode:
         # the dispatch path runs exactly as before (no acquire/release). When set,
         # a run is only dispatched while this node holds that run's lease.
         self._lease_manager = lease_manager
@@ -290,8 +290,8 @@ class RunOrchestrator:
         self._approval_queues: dict[str, asyncio.Queue[ApprovalDecision]] = {}
         self._stopped = False
         self._lifecycle_lock = asyncio.Lock()
-        # G-C3: per-run OversightEngine 레지스트리 (INV-R6 — contextvar 금지)
-        # runner가 소유; API Layer(Lane B)에서 register_run_engine/deregister_run_engine 호출.
+        # Per-run OversightEngine registry (INV-R6 — contextvar 금지).
+        # runner가 소유; register_run_engine/deregister_run_engine 호출로 관리.
         # _engine_registry_lock은 threading.Lock (동기 API에서 접근하므로 asyncio.Lock 불가).
         # SG-20260621-16: OversightEngineProtocol로 타입 좁히기.
         self._engine_registry: dict[str, OversightEngineProtocol] = {}
@@ -301,7 +301,7 @@ class RunOrchestrator:
         # registry operations delegate here so request_pause sees the correct
         # per-run engines registered by DispatcherAdapter.
         self._external_engine_registry: Any = external_engine_registry
-        # G-C3: 이미 재디스패치된 체크포인트 참조 추적 (INV-3 멱등 resume)
+        # 이미 재디스패치된 체크포인트 참조 추적 (INV-3 멱등 resume)
         self._resumed_checkpoints: set[str] = set()
         self._resumed_checkpoints_lock = threading.Lock()
         # SG-20260621-09: per-run interrupt state machine records (INV-SM-1).
@@ -372,7 +372,7 @@ class RunOrchestrator:
         self._lease_manager = lease_manager
 
     # ------------------------------------------------------------------ #
-    # G-C3: per-run engine registry (INV-R6 — contextvar 절대 금지)
+    # Per-run engine registry (INV-R6 — contextvar 절대 금지)
     # ------------------------------------------------------------------ #
 
     def register_run_engine(self, run_id: str, engine: OversightEngineProtocol) -> None:
@@ -542,7 +542,7 @@ class RunOrchestrator:
         D-F/INV-9: rule_of_two_axes가 3개 → ResumeRequiresHITLError.
         CheckpointMismatchError: from_ref가 저장소에 없으면 raise.
 
-        G-C3 D-D §8.3: steer_handler (optional) — if provided, emits the second
+        steer_handler (optional) — if provided, emits the second
         steer.resumed producer (structural, with from_checkpoint_id) after the
         engine pause is cleared. When None, the event is omitted (backward-compat
         for callers that have not wired a SteerHandler).
@@ -628,7 +628,7 @@ class RunOrchestrator:
                 actor=checkpoint.actor,
             )
 
-        # G-C3 D-D §8.3: emit the second steer.resumed producer (structural,
+        # Emit the second steer.resumed producer (structural,
         # with from_checkpoint_id). Distinguished from apply()'s cosmetic
         # steer.resumed by the presence of ``from_checkpoint_id`` in the payload.
         if steer_handler is not None:
@@ -705,7 +705,7 @@ class RunOrchestrator:
         task.add_done_callback(lambda t: self._tasks.pop(run_id, None))
 
     async def resume(self, record: RunRecord) -> None:
-        """Re-schedule an *existing* (already-persisted) run's pipeline (G-C8).
+        """Re-schedule an *existing* (already-persisted) run's pipeline.
 
         Unlike :meth:`enqueue` this does NOT call ``state_store.create`` — the run
         row already exists (it survived the crash). It just re-launches the
@@ -740,7 +740,7 @@ class RunOrchestrator:
         await self._signal(run_id, ApprovalDecision(action="approve", approver=approver))
 
     async def partial_approve(self, run_id: str, *, approver: str, step_ids: list[str]) -> None:
-        """DA-H4: approve ONLY ``step_ids`` of the awaiting plan (Plan Review).
+        """Approve ONLY ``step_ids`` of the awaiting plan (Plan Review).
 
         Signals the same approval queue as :meth:`approve` but carries the selected
         step subset so the dispatcher mints a narrowed :class:`ApprovalScope`.
@@ -773,7 +773,7 @@ class RunOrchestrator:
         return await self._store.get(run_id)
 
     async def find_record_by_plan_id(self, plan_id: str) -> RunRecord | None:
-        """DA-H4: resolve the run record whose stored plan has ``id == plan_id``.
+        """Resolve the run record whose stored plan has ``id == plan_id``.
 
         Plans are keyed by ``run_id`` in the state store, so the read-only
         ``GET /api/plans/{plan_id}`` endpoint resolves the owning record by
@@ -815,7 +815,7 @@ class RunOrchestrator:
             raise
 
     async def _run_pipeline_leased(self, run_id: str, command: str, context: dict[str, Any]) -> None:
-        """Run the pipeline only while holding this run's HA lease (G-C8).
+        """Run the pipeline only while holding this run's HA lease.
 
         Fail-closed: if another node already holds the lease, this node does not
         dispatch the run and leaves its state untouched (the lease holder owns
@@ -1016,12 +1016,12 @@ class RunOrchestrator:
             await self._store.update_state(
                 run_id,
                 RunState.PLANNING,
-                # DA-H2: surface immutable AI-generated provenance on the stored
-                # plan so ``GET /runs/{id}`` (and the W5-c Plan Review UI) can
-                # render the AI-identification notice. Read from the threaded
-                # PlanLike fields (no concrete ``Plan`` import in the runner).
-                # DA-H4 (W5-c a′): ALSO durably surface the goal, full ``step_list``,
-                # planner-declared ``risks`` and ``assigned_subs`` so the read-only
+                # Surface immutable AI-generated provenance on the stored plan so
+                # ``GET /runs/{id}`` (and the Plan Review UI) can render the
+                # AI-identification notice. Read from the threaded PlanLike fields
+                # (no concrete ``Plan`` import in the runner).
+                # ALSO durably surface the goal, full ``step_list``, planner-declared
+                # ``risks`` and ``assigned_subs`` so the read-only
                 # ``GET /api/plans/{id}`` Plan Review endpoint has an internal source
                 # for the HEAD risk section + per-step checkboxes. The legacy
                 # ``steps`` (int count) and provenance keys are preserved verbatim
@@ -1043,10 +1043,10 @@ class RunOrchestrator:
                 },
             )
 
-            # 2. COST QUOTA GATE (BDP_03 item 12) — fail-closed BEFORE the human
-            # approval gate. An over-budget run must be REFUSED on its own; it
-            # must never sit in AWAITING_APPROVAL consuming a human's attention on
-            # work that can never run (§12.6 I1, no silent pass). Enforcing here
+            # 2. COST QUOTA GATE — fail-closed BEFORE the human approval gate.
+            # An over-budget run must be REFUSED on its own; it must never sit in
+            # AWAITING_APPROVAL consuming a human's attention on work that can never
+            # run (§12.6 I1, no silent pass). Enforcing here
             # (not after APPROVED) also means a reviewer never approves a plan that
             # the budget will then reject. ``None`` ledger ⇒ no gate (legacy).
             gate = await self._quota_gate(_raw_tenant)
@@ -1116,9 +1116,9 @@ class RunOrchestrator:
             await self._store.update_state(run_id, RunState.EXECUTING)
 
             try:
-                # DA-H4: a partial Plan Review approval carries the selected step
-                # subset; thread it so the dispatcher mints an ApprovalScope narrowed
-                # to EXACTLY those steps. ``None`` ⇒ full plan (legacy approve). Only
+                # A partial Plan Review approval carries the selected step subset;
+                # thread it so the dispatcher mints an ApprovalScope narrowed to
+                # EXACTLY those steps. ``None`` ⇒ full plan (legacy approve). Only
                 # pass the kwarg when narrowing so legacy dispatcher fakes that do not
                 # accept ``approved_step_ids`` keep working on the full-approval path.
                 if decision.approved_step_ids is not None:
@@ -1183,7 +1183,7 @@ class RunOrchestrator:
     # ------------------------------------------------------------------ #
 
     async def _quota_gate(self, raw_tenant_id: object | None) -> str | None:
-        """Decide whether this run may proceed past the cost gate (BDP_03 item 12).
+        """Decide whether this run may proceed past the cost gate.
 
         ``raw_tenant_id`` is the *unparsed* ``context["tenant_id"]`` value (``None``
         when the key was absent). Returns the run's ``failure_reason`` when the run
@@ -1292,7 +1292,7 @@ async def _noop_publish(run_id: str, topic: str, payload: dict[str, Any]) -> Non
     return None
 
 
-# DA-H4 (W5-c a′): the Step fields the Plan Review surface needs. ``context`` is
+# The Step fields the Plan Review surface needs. ``context`` is
 # included because ``GET /runs/{id}/plan-decision`` recomputes the Rule of Two
 # axes (``rule_of_two.axes_for_steps``) from the persisted steps, and axis ①
 # (untrusted_input) is carried in ``Step.context`` provenance — dropping it would
@@ -1313,7 +1313,7 @@ _PLAN_STEP_FIELDS = (
 
 
 def _serialize_plan_steps(steps: list[Any]) -> list[dict[str, Any]]:
-    """Project each plan step to a JSON-serialisable dict (DA-H4 a′).
+    """Project each plan step to a JSON-serialisable dict.
 
     Duck-typed so the runner stays free of a concrete ``Step`` import: a pydantic
     ``Step`` is dumped via ``model_dump(mode="json")``; a plain dict is read

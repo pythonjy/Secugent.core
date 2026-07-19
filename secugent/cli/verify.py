@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Read-only public verification API for ``secugent verify`` (BDP Phase 1 item 2).
+"""Read-only public verification API for ``secugent verify``.
 
 Two externally-reproducible trust proofs, exposed as a one-line CLI:
 

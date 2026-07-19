@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Single source of truth for the dev/prod environment decision (DA-C2).
+"""Single source of truth for the dev/prod environment decision.
 
 This is the CORE-level decider so that both the API layer (:mod:`secugent.api.env`,
 which re-exports it) and core/library modules (e.g. :mod:`secugent.core.llm_client`)

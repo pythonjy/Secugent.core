@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``secugent restore`` — fail-closed restore of the audit event store (DA-H6).
+"""``secugent restore`` — fail-closed restore of the audit event store.
 
 Restoring the append-only audit store is a trust-critical operation: a restore
 that silently accepts a tamper-broken database would destroy the very
@@ -210,7 +210,7 @@ def run_restore(*, src_path: Path, db_path: Path, force: bool) -> int:
 def _parse_args(rest: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="secugent restore",
-        description="Restore the audit event store, re-verifying its hash chain (DA-H6).",
+        description="Restore the audit event store, re-verifying its hash chain.",
     )
     parser.add_argument(
         "--from",

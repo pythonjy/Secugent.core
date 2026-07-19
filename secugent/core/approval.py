@@ -242,7 +242,7 @@ class ApprovalService:
         # multi-step scope that merely *contains* this step id is NOT dedicated.
         step_dedicated = scope.step_ids == [step.id]
 
-        # G-C2: generalize the single-axis carve-out to the full Rule of Two
+        # Generalize the single-axis carve-out to the full Rule of Two
         # (§A-2.1). A step that trips all three axes (untrusted input + sensitive
         # access + external comm) can NEVER ride a plan-level pre-approval — it is
         # authorized ONLY by an approval dedicated to this exact step (a fresh,
@@ -257,7 +257,7 @@ class ApprovalService:
         # change is needed in this gate (it already routes the decision through the
         # single core classifier). The deterministic *producer* that injects that
         # provenance (``HeadAgent.mark_untrusted_source``) is not yet wired into live
-        # planning (BDP_02 항목 5 deferral) — this gate is correct either way, since a
+        # planning (provenance axis deferral) — this gate is correct either way, since a
         # provenance block from any source (LLM plan or future producer) routes here.
         rule_of_two_hitl = requires_hitl(classify_axes(step, RuleOfTwoContext.from_step(step)))
         if rule_of_two_hitl and not step_dedicated:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Boot-time wiring for the durable run-state store (G-C7).
+"""Boot-time wiring for the durable run-state store.
 
 ``OrchestratorConfig.run_state_backend`` selects *which* :class:`RunStateStore`
 the orchestrator persists run lifecycle + audit ribbon to. Historically this
@@ -119,7 +119,7 @@ def resolve_run_state_store(
 
 
 # ---------------------------------------------------------------------------
-# G-C8 — HA lease manager resolution
+# HA lease manager resolution
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +202,7 @@ def resolve_lease_manager(
 
 
 # ---------------------------------------------------------------------------
-# G-C8 — boot-time crash recovery hook
+# Boot-time crash recovery hook
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +214,7 @@ async def recover_open_runs(
     lease_manager: LeaseManager | None = None,
     worker_id: str = "node-local",
 ) -> RecoveryReport:
-    """Boot hook the lifespan calls once after the orchestrator starts (G-C8).
+    """Boot hook the lifespan calls once after the orchestrator starts.
 
     Enumerates open runs from ``state_store`` (``list_open_runs`` is a MANDATORY
     member of the :class:`RunStateStore` Protocol) and feeds them to

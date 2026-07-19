@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Air-gap bundle integrity, constraints reproducibility, and HA single-writer.
 
-BDP_04 항목 13. Three infra-free, deterministic pieces back the deploy artifacts
+Three infra-free, deterministic pieces back the deploy artifacts
 (``deploy/airgap/bundle.sh``, ``deploy/constraints.txt``, PG HA):
 
 1. **Bundle manifest / checksum** (:func:`build_manifest`, :func:`verify_bundle`)
@@ -232,7 +232,7 @@ def parse_constraints(text: str) -> tuple[PinnedRequirement, ...]:
 
 # A fixed run-id under which the *writer* (leader) role is leased. The arbiter is
 # only a naming/guard shim over the leader lock — it owns no SQL and no lease
-# bookkeeping of its own (CLAUDE.md §A: control decisions have a single source of
+# bookkeeping of its own (control decisions have a single source of
 # truth; wrappers call core, they never re-decide).
 _WRITER_ROLE = "ha-writer"
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""N1 (생산자 브리지) — connector/tool payloads → run-context grounding seed.
+"""Connector/tool payloads → run-context grounding seed (producer bridge).
 
 The **producer** half of the grounding-citation path, symmetric to the consumer
 :func:`secugent.orchestrator.runner._bind_plan_evidence`. A retrieval connector /

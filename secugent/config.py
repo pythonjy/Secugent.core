@@ -78,14 +78,14 @@ class OrchestratorConfig:
     # previous default was a bare ``"memory"``, which was indistinguishable from an
     # explicit choice and so silently swallowed the prod fail-fast path.
     run_state_backend: RunStateBackend | None = None
-    # Filesystem path for the ``"sqlite"`` run-state backend (G-C7). Ignored by
-    # the ``"memory"`` backend. ``":memory:"`` selects an ephemeral in-process
+    # Filesystem path for the ``"sqlite"`` run-state backend. Ignored by the
+    # ``"memory"`` backend. ``":memory:"`` selects an ephemeral in-process
     # SQLite DB. Resolved into a store by
     # :func:`secugent.orchestrator.wiring.resolve_run_state_store`.
     run_state_db_path: str = "data/run_state.db"
     fail_fast: bool = True
-    # HA single-leader lease (G-C8). OFF by default = single-node, so existing
-    # boots are unchanged. ``resolve_lease_manager`` returns ``None`` while
+    # HA single-leader lease. OFF by default = single-node, so existing boots
+    # are unchanged. ``resolve_lease_manager`` returns ``None`` while
     # ``ha_enabled`` is falsy; when enabled it selects a lease backend by
     # ``ha_backend`` (falling back to ``run_state_backend``). In-memory HA is
     # dev-only (it cannot guarantee a single leader across nodes); ``"pg"``

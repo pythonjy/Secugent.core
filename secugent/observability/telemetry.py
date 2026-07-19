@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 항목 7 — opt-in adoption telemetry collector (Core observability).
+"""Opt-in adoption telemetry collector (Core observability).
 
 Why
 ---

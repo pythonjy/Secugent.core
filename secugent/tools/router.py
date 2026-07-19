@@ -263,12 +263,16 @@ class ToolRouter:
 
         if action == "compute":
             # No real compute backend in v0.1 — backend stub for repeatability.
-            return self._require_backend().execute_step(step)
+            # The backend type is Any in open-core (secugent.desktop absent);
+            # execute_step's contract returns ToolResult, so assert the boundary type.
+            compute_result: builtin.ToolResult = self._require_backend().execute_step(step)
+            return compute_result
 
         if action == "desktop":
             if not self._config.enable_real_desktop:
                 # Fall back to the virtual desktop sandbox.
-                return self._require_backend().execute_step(step)
+                desktop_result: builtin.ToolResult = self._require_backend().execute_step(step)
+                return desktop_result
             driver = self._config.real_desktop_driver
             if driver is None:
                 raise RealDesktopDisabledError("real desktop enabled but no driver configured")

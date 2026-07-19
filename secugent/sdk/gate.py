@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The single embed-SDK oversight gate — a thin wrapper over the core decision path.
 
-BDP_02 item 4 invariant **I1**: the SDK must call the existing deterministic core
+Invariant **I1**: the SDK must call the existing deterministic core
 (``OversightEngine`` + ``rule_of_two`` + the §C-2 audit emitter) and never
 re-implement control logic. :class:`OversightGate` is the **one** place that
 composes that decision, in the exact order the production ``SubAgent`` uses:

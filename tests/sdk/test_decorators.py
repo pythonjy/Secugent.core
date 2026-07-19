@@ -266,6 +266,7 @@ def test_three_axis_step_with_approving_gateway_passes() -> None:
 def test_hitl_modify_decision_is_fail_closed() -> None:
     """A non-approve (modify) HITL outcome blocks (only approve passes)."""
     from secugent.agents.sub_agent import HitlDecision
+
     from secugent.core.contracts import Approval
     from secugent.core.risk_analyzer import RiskAssessment
 
@@ -313,6 +314,7 @@ def test_decorator_with_no_positional_args_uses_none_target() -> None:
 
 def test_hitl_timeout_is_fail_closed() -> None:
     from secugent.agents.sub_agent import HitlDecision, HitlTimeoutError
+
     from secugent.core.contracts import Approval
     from secugent.core.risk_analyzer import RiskAssessment
 

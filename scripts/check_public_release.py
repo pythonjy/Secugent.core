@@ -306,6 +306,115 @@ _TEXT_SUFFIXES: Final[frozenset[str]] = frozenset(
 )
 
 
+# --------------------------------------------------------------------------- #
+# Excluded-tier reference scan for shipped NON-Python files (defence-in-depth).
+#
+# Import-closure (I2) AST-parses only ``.py`` files, and the CHG-2 prose scanner
+# hunts internal-strategy TOKENS — neither looks for an excluded-tier MODULE
+# string inside a shipped *non-Python* artifact. That gap once let a deploy
+# ``Dockerfile`` (``CMD ["uvicorn", "secugent.api.main:create_app"]``) and a
+# ``docker-compose.yml`` (``image: secugent/api:...``) reference the EXCLUDED
+# ``secugent.api`` Enterprise tier: the public image could not boot (the tier is
+# not shipped) yet the gate stayed green. This scan closes that gap — every
+# shipped non-``.py`` text file is checked for a reference to any excluded tier
+# (:data:`FORBIDDEN_IMPORT_PREFIXES`) in BOTH dotted (``secugent.api``) and slash
+# (``secugent/api``) form, plus the top-level console UI as ``ui/``. A hit is a
+# fail-closed violation reported with file:line and the matched tier.
+
+# Suffixes scanned: every text suffix the gate reads EXCEPT ``.py`` (import
+# closure already governs Python). Extensionless files (``""``) are in the set;
+# ``Dockerfile``/``Dockerfile.*`` are handled by name in
+# :func:`_is_tier_ref_scan_target` (the canonical container-artifact leak surface).
+_TIER_REF_SCAN_SUFFIXES: Final[frozenset[str]] = frozenset(_TEXT_SUFFIXES - {".py"})
+
+# Formats whose ``#`` begins a line comment. A tier name that appears AFTER a
+# ``#`` is inert (it cannot boot/ship the tier), so the comment tail is stripped
+# before matching — this keeps legitimate boundary-explaining comments in
+# packaging / CI config (``pyproject.toml``, ``.github/workflows/*.yml``) from
+# false-positiving while a real executable reference (before any ``#``) is still
+# caught. Markdown / rST / plain-text / JSON do NOT treat ``#`` as a comment and
+# are scanned verbatim.
+_TIER_REF_HASH_COMMENT_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {".yml", ".yaml", ".toml", ".sh", ".env", ".example", ".cfg", ".ini", ""}
+)
+
+# Whole-file exemptions: files that legitimately NAME the excluded tiers. Two
+# rationales, both prose / declaration — never an executable reference that would
+# load the tier at container / script runtime:
+#
+# * boundary-DESCRIBING docs — README / OPEN_CORE / SECURITY / CHANGELOG /
+#   CONTRIBUTING and everything under ``docs/security/`` explain the open-core
+#   split and so must name the enterprise tiers;
+# * boundary-MACHINERY — the manifest's ``exclude:`` list literally enumerates
+#   ``secugent/<tier>/**``; the runbook's leak-scan commands grep
+#   ``secugent/<tier>/``; the extract script names the same leak-scan paths (this
+#   is the SAME trio the CHG-2 prose scanner exempts per-token). VCS metadata
+#   (``.gitignore`` / ``.gitattributes``) carry path-ignore / attribute patterns
+#   (e.g. ``ui/node_modules/``), not executable references.
+#
+# Deliberately NOT exempt (open-core policy — an executable/consumed artifact must
+# fail closed): ``pyproject.toml`` and the CI workflows. They only de-select the
+# tier (``exclude = [..., "secugent.enterprise*"]`` — handled by the ``*``-glob
+# boundary) or mention it in a ``#`` comment (stripped), so a REAL future
+# entry-point / image reference in them (``secugent.api.main:app``) is still
+# caught fail-closed. ``config/**`` / ``deploy/**`` / ``*.sh`` stay in scope too.
+_TIER_REF_EXEMPT_FILES: Final[frozenset[str]] = frozenset(
+    {
+        # boundary-describing docs
+        "README.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "CONTRIBUTING.md",
+        "docs/OPEN_CORE.md",
+        # boundary machinery (manifest / runbook / extract script)
+        "release/public_manifest.yaml",
+        "release/PUBLIC_RELEASE_RUNBOOK.md",
+        "scripts/extract_public_repo.sh",
+        # VCS metadata carrying path patterns, not executable references
+        ".gitignore",
+        ".gitattributes",
+    }
+)
+# Repo-relative POSIX path prefixes whose subtree is boundary-describing docs.
+_TIER_REF_EXEMPT_PREFIXES: Final[tuple[str, ...]] = ("docs/security/",)
+
+
+def _build_tier_ref_patterns() -> tuple[tuple[str, tuple[re.Pattern[str], ...]], ...]:
+    """Compile per-tier reference regexes from :data:`FORBIDDEN_IMPORT_PREFIXES`.
+
+    Derived from the SAME deny-set the import-closure gate uses, so a tier added
+    there is automatically covered here too (no drift). For each dotted tier
+    (``secugent.api``) both the dotted and slash (``secugent/api``) forms are
+    matched; the bare top-level ``ui`` is matched only as the ``ui/`` path segment
+    (a dotted ``ui`` would false-positive on ordinary prose). Boundaries:
+
+    * a leading ``(?<![A-Za-z0-9_])`` so a longer left word (``mysecugent.api``)
+      does not match;
+    * a trailing ``(?![A-Za-z0-9_*])`` so a longer name (``secugent.apis``) and a
+      packaging glob de-selection (``secugent.enterprise*`` in an ``exclude``
+      list) do NOT match, while a real reference DOES (``secugent.api.main``,
+      ``secugent/api:``, ``secugent/api/``).
+
+    Returns tiers in :data:`FORBIDDEN_IMPORT_PREFIXES` order (deterministic).
+    """
+    grouped: list[tuple[str, tuple[re.Pattern[str], ...]]] = []
+    for prefix in FORBIDDEN_IMPORT_PREFIXES:
+        if "." in prefix:
+            dotted = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(prefix)}(?![A-Za-z0-9_*])")
+            slash = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(prefix.replace('.', '/'))}(?![A-Za-z0-9_*])")
+            grouped.append((prefix, (dotted, slash)))
+        else:
+            # Top-level package outside ``secugent`` (``ui``): only the ``ui/``
+            # path-segment form, bounded left so ``gui/`` / ``build-ui/`` /
+            # ``foo/ui/`` do not match.
+            seg = re.compile(rf"(?<![A-Za-z0-9_./-]){re.escape(prefix)}/")
+            grouped.append((prefix, (seg,)))
+    return tuple(grouped)
+
+
+_TIER_REF_PATTERNS: Final[tuple[tuple[str, tuple[re.Pattern[str], ...]], ...]] = _build_tier_ref_patterns()
+
+
 class ManifestError(ValueError):
     """Raised when the manifest is missing, unreadable, or malformed."""
 
@@ -950,14 +1059,86 @@ def _prose_token_reasons(rel: str, text: str) -> list[str]:
     return reasons
 
 
+def _is_tier_ref_scan_target(rel: str) -> bool:
+    """True if ``rel`` is a shipped NON-Python text file the tier-ref scan checks.
+
+    In scope: any file whose suffix is a gate-read text suffix other than ``.py``
+    (import closure already governs Python), any extensionless file, and any
+    ``Dockerfile`` / ``Dockerfile.*`` (the container-artifact leak surface). Out of
+    scope: ``.py`` files and the whole-file exemptions
+    (:data:`_TIER_REF_EXEMPT_FILES` / :data:`_TIER_REF_EXEMPT_PREFIXES`) — the
+    boundary-describing docs and boundary machinery that legitimately name tiers.
+    """
+    if rel in _TIER_REF_EXEMPT_FILES:
+        return False
+    if any(rel.startswith(prefix) for prefix in _TIER_REF_EXEMPT_PREFIXES):
+        return False
+    if PurePosixPath(rel).name.startswith("Dockerfile"):
+        return True
+    return PurePosixPath(rel).suffix.lower() in _TIER_REF_SCAN_SUFFIXES
+
+
+def _strip_hash_comment(line: str, rel: str) -> str:
+    """Drop a ``#`` comment tail for hash-comment formats; else return verbatim.
+
+    A tier name that follows a ``#`` is inert (it cannot boot the tier at
+    container / script runtime), so stripping the comment tail keeps legitimate
+    boundary-explaining comments in packaging / CI config from false-positiving
+    while a real executable reference (which appears BEFORE any ``#``) is still
+    scanned. The format is decided by suffix (or a ``Dockerfile`` name);
+    Markdown / rST / plain-text / JSON are returned unchanged (``#`` is a heading /
+    literal there, not a comment)."""
+    is_hash = PurePosixPath(rel).name.startswith("Dockerfile") or (
+        PurePosixPath(rel).suffix.lower() in _TIER_REF_HASH_COMMENT_SUFFIXES
+    )
+    if not is_hash:
+        return line
+    idx = line.find("#")
+    return line[:idx] if idx != -1 else line
+
+
+def _tier_ref_reasons(rel: str, text: str) -> list[str]:
+    """Excluded-tier references in the body of a shipped non-Python file.
+
+    For every line (comment tail stripped where the format uses ``#`` comments),
+    each tier in :data:`_TIER_REF_PATTERNS` is checked; the first matching form
+    (dotted or slash) yields ONE violation naming the tier, the matched text, and
+    the 1-based line. Fail-closed: any hit is a violation (the caller turns a
+    non-empty result into a non-zero exit). Deterministic — tiers are checked in
+    :data:`FORBIDDEN_IMPORT_PREFIXES` order and the caller sorts the result."""
+    reasons: list[str] = []
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        line = _strip_hash_comment(raw, rel)
+        for tier, patterns in _TIER_REF_PATTERNS:
+            for pattern in patterns:
+                match = pattern.search(line)
+                if match is not None:
+                    reasons.append(
+                        f"excluded-tier reference {match.group(0)!r} (tier {tier}) "
+                        f"in shipped non-Python file {rel}:{line_no}"
+                    )
+                    break  # one report per (line, tier) is enough to fail closed.
+    return reasons
+
+
 def scan_forbidden_content(files: list[Path]) -> list[str]:
     """Return forbidden-content violations in the public file set (I5).
 
-    Three independent gates:
+    Four independent gates:
 
     * **internal-strategy file names** — CLAUDE.md, Review/, docs/specs/, the
       Korean strategy HTMLs, etc., by basename/path/Hangul-substring (so a
       manifest glob mistype cannot let them leak).
+    * **excluded-tier references in non-Python files** — every shipped non-``.py``
+      text file (Dockerfile / ``*.yml`` / ``*.sh`` / ``*.toml`` / config / …) is
+      scanned for a reference to an excluded tier
+      (:data:`FORBIDDEN_IMPORT_PREFIXES`) in dotted (``secugent.api``) or slash
+      (``secugent/api``) form, plus the console UI as ``ui/``. Import-closure only
+      parses ``.py``, so this catches a deploy/orchestration artifact that names a
+      non-shipped tier (the ``secugent.api``-in-Dockerfile leak). Boundary-
+      describing docs and boundary machinery are exempted whole-file
+      (:data:`_TIER_REF_EXEMPT_FILES`); ``#`` comment tails and packaging glob
+      de-selections (``secugent.enterprise*``) are not references.
     * **internal prose tokens** (CHG-2) — UNAMBIGUOUS internal tokens
       (``Project_Secugent``, ``DEPLOY_PROGRESS``, ``BDP_REFORMED``, ``BDP_0``,
       ``Review/``, ``docs/specs/``) appearing in the BODY of a shipped public
@@ -987,8 +1168,9 @@ def scan_forbidden_content(files: list[Path]) -> list[str]:
             violations.append(secret_name)
 
         scan_prose = _is_prose_scan_target(rel)
+        scan_tier = _is_tier_ref_scan_target(rel)
         scan_secrets = rel not in _SECRET_SCAN_SELF_EXEMPT and (path.suffix.lower() in _TEXT_SUFFIXES)
-        if not (scan_prose or scan_secrets):
+        if not (scan_prose or scan_tier or scan_secrets):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -1000,6 +1182,8 @@ def scan_forbidden_content(files: list[Path]) -> list[str]:
             continue
         if scan_prose:
             violations.extend(_prose_token_reasons(rel, text))
+        if scan_tier:
+            violations.extend(_tier_ref_reasons(rel, text))
         if scan_secrets:
             for label in _secret_hits_in_text(text):
                 violations.append(f"{rel}: secret-like content ({label})")

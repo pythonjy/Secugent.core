@@ -114,10 +114,12 @@ def test_is_public_path_include_minus_exclude(manifest: ReleaseManifest) -> None
     assert is_public_path("secret_notes.txt", manifest) is False
 
 
-def test_is_public_path_env_example_allowed_but_env_excluded(manifest: ReleaseManifest) -> None:
-    # deploy/.env.example is explicitly public; a real .env is excluded.
-    assert is_public_path("deploy/.env.example", manifest) is True
+def test_is_public_path_deploy_artifacts_are_private(manifest: ReleaseManifest) -> None:
+    # deploy/** artifacts (incl. .env.example) are PRIVATE: they boot the Enterprise
+    # secugent.api tier, so the OSS repo ships as library + CLI + SDK with no server.
+    assert is_public_path("deploy/.env.example", manifest) is False
     assert is_public_path("deploy/.env", manifest) is False
+    assert is_public_path("deploy/Dockerfile", manifest) is False
 
 
 def test_is_public_path_internal_docs_excluded(manifest: ReleaseManifest) -> None:
@@ -390,6 +392,11 @@ def test_excluded_existing_files_excludes_public_and_keeps_private(
     """``_excluded_existing_files`` returns repo .py files that exist but are NOT
     public — exactly the import targets that break the extract. sub_agent.py /
     router.py (excluded) must be in it; runner.py / a shipping core file must not."""
+    # Extract-time detection of excluded-but-present private .py files. It only
+    # applies where the private tier is physically present (the Enterprise source
+    # tree); the extracted public repo has no private .py to detect, so skip there.
+    if not (REPO_ROOT / "secugent" / "agents" / "sub_agent.py").exists():
+        pytest.skip("private tier absent (public repo) — extract-time check N/A")
     from scripts.check_public_release import _excluded_existing_files
 
     files = public_files(manifest, REPO_ROOT)
@@ -440,9 +447,12 @@ def test_content_korean_strategy_html_is_violation(tmp_path: Path) -> None:
 
 
 def test_content_env_example_placeholders_not_flagged() -> None:
-    """.env.example ships change-me-* placeholders — must NOT be a secret hit."""
+    """.env.example ships change-me-* placeholders — must NOT be a secret hit.
+    deploy/ is private in the OSS distribution, so the file is absent in the
+    extracted public repo; this guards the scanner where the file exists."""
     env_example = REPO_ROOT / "deploy" / ".env.example"
-    assert env_example.is_file()
+    if not env_example.is_file():
+        pytest.skip("deploy/.env.example excluded from the public distribution")
     assert scan_forbidden_content([env_example]) == []
 
 

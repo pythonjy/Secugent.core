@@ -103,6 +103,7 @@ class TestCooperativePauseAtStepBoundary:
             AutoApproveHitlGateway,
             SubAgent,
         )
+
         from secugent.core.approval import ApprovalService
         from secugent.core.contracts import RiskScore
         from secugent.core.event_store import EventStore

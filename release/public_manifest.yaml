@@ -113,7 +113,7 @@ include:
   # package — is a different path and stays public via the includes above.)
   - "config/models.yaml"
   - "release/public_manifest.yaml"
-  - "release/PUBLIC_RELEASE_RUNBOOK.md"
+  # release/PUBLIC_RELEASE_RUNBOOK.md moved to exclude (maintainer-internal — see below)
   # Release notes shipped so runbook §6.3 `gh release create --notes-file
   # release/RELEASE_NOTES_v0.1.0.md` resolves inside the extracted public repo.
   - "release/RELEASE_NOTES_v0.1.0.md"
@@ -161,6 +161,10 @@ exclude:
   - "Review/**"
   - "BDP_REFORMED/**"
   - "docs/specs/**"
+  # Maintainer-internal enterprise->public extraction runbook. Public users never run
+  # the extraction; it also names specific internal strategy-doc filenames + private
+  # repo structure. Kept PRIVATE — the public boundary story lives in docs/OPEN_CORE.md.
+  - "release/PUBLIC_RELEASE_RUNBOOK.md"
   # Agent-team ops policies + bizdev sales artifacts (2026-07-19). Both are already
   # private via deny-by-default (not matched by any include glob); excluded
   # explicitly as defence-in-depth per the header rule for high-sensitivity paths.
@@ -204,6 +208,13 @@ exclude:
   - "tests/unit/test_desktop_factory.py"
   - "tests/unit/test_desktop_security.py"
   - "tests/unit/test_stub_backend.py"
+  # tests/desktop/** exercise the private secugent.desktop tier (Windows sandbox) via
+  # external tools/mocks; they carry no public-code coverage and belong to the
+  # excluded desktop tier (they also embed internal fix IDs in filenames).
+  - "tests/desktop/**"
+  # tests/cli/test_serve.py drove the removed `serve` subcommand and imports
+  # secugent.api.* (HTTP server is Enterprise-tier) — I8 ModuleNotFoundError standalone.
+  - "tests/cli/test_serve.py"
   # MIXED test dirs — exclude only the individual files that import a private
   # tier (the Core tests in the same dir still ship). Enumerated by the AST
   # closure scan over tests/ (BDP_05 item 2).
@@ -213,6 +224,10 @@ exclude:
   # excluded above) — would ModuleNotFoundError under the extracted public repo
   # (Invariant I8). Added W7 (import-closure round; G2 8→0).
   - "tests/audit/test_b5_kms_provider.py"
+  # test_build_kms_provider.py drives the Enterprise VaultTransitProvider (imports
+  # secugent.enterprise.kms lazily) — fails at runtime under the standalone public
+  # repo (Invariant I8); it tests a private tier, not public code.
+  - "tests/audit/test_build_kms_provider.py"
   - "tests/models/test_cascade_router.py"
   - "tests/orchestrator/test_runner_quota.py"
   - "tests/steer/test_steer_failed_hash_chain.py"

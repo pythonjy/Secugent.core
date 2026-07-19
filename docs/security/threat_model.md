@@ -85,7 +85,7 @@ Each row maps to a contract threat code (T1–T8) / invariant and the enforcing 
 | Threat | Vector | Control | Ref |
 | --- | --- | --- | --- |
 | Secrets/PII in logs | Token/RRN written to JSONL or SQLite | `logger.redact()` applied on both sinks; chain hashes the *redacted* `stored_view`, never plaintext | `core/logger.py`, `audit/hash_chain.py`, `T5` |
-| PII in chain body | `body_canonical` carrying plaintext | Chain hashes the redacted/normalised event; regression-tested (SG-20260601-02) | `audit/hash_chain.py` |
+| PII in chain body | `body_canonical` carrying plaintext | Chain hashes the redacted/normalised event; regression-tested | `audit/hash_chain.py` |
 | Leak via error messages | Verbose exceptions exposing internals | `VerifyInputError` and contract exceptions give a cause without dumping payloads; `secugent verify` is read-only and prints locations, not data | `cli/verify.py` |
 | Cross-tenant leakage | One tenant reads another's events | All chain/store reads are scoped by `tenant_id`; verify queries are tenant-filtered | `cli/verify.py`, `audit/hash_chain.py` |
 | Credential exfiltration via tool | Connector leaks a secret on-behalf-of | Credential non-exfiltration + on-behalf-of attribution (EM-06) | contract §11.3 |
@@ -119,7 +119,7 @@ tenet): we do not rely on "the LLM resisting it." Instead:
 - REGULATIONS cannot be relaxed by content — only strengthened, admin-approved.
 
 > Staged boundary: the automatic provenance-based axis-① *producer* (taint
-> propagation) lands in Stage 6 (G-C4). Until then axis ① requires an explicit
+> propagation) lands in a later hardening stage. Until then axis ① requires an explicit
 > declaration; the deterministic engine, gate, and audit production are complete and
 > tested. See `secugent/core/rule_of_two.py` module note. This is a known staged
 > limitation, documented here for honest disclosure.

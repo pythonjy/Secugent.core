@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Generate a deterministic CycloneDX 1.5 JSON SBOM (BDP Phase 1 item 2).
+"""Generate a deterministic CycloneDX 1.5 JSON SBOM.
 
 Why: an SBOM ("of what is this built?") is a baseline trust requirement for a
 security product — it lets an external party fix dependency versions and audit
 the supply chain. We emit it from the *installed* distributions via
 ``importlib.metadata`` (pure stdlib + ``json``); no heavy SBOM library is added
-(BDP non-scope: "DO NOT add a heavy new dependency").
+(non-scope: "DO NOT add a heavy new dependency").
 
-**DA-H7 fix**: The previous implementation enumerated ALL installed distributions
+The previous implementation enumerated ALL installed distributions
 in the active virtual environment, causing SBOM pollution with ~16+ unrelated
 packages (yfinance, discord, etc.) that are not part of secugent's dependency
 closure.  The fixed implementation resolves the *transitive closure* of the
@@ -219,7 +219,7 @@ def _self_version(repo_root: Path) -> str:
     stale (``0.0.0+local`` on an editable install built from an older wheel, or
     ``0.0.1`` from a previous release on PyPI) and does NOT reflect the version
     declared in the source tree.  Reading ``pyproject.toml`` always returns the
-    authoritative in-tree version (DA-H7 fix).
+    authoritative in-tree version.
     """
     with (repo_root / "pyproject.toml").open("rb") as fh:
         data = tomllib.load(fh)

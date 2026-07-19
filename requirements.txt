@@ -7,7 +7,7 @@ tenacity>=8.2
 python-multipart>=0.0.9
 jsonschema>=4.21
 PyYAML>=6.0
-# DA-H9: runtime deps added with W6-W8 public-tier sync (2026-07-19)
+# runtime deps added with the public-tier sync (2026-07-19)
 structlog>=24.1.0
 aiosmtplib>=3.0
 prometheus_client>=0.20

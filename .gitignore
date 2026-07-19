@@ -22,11 +22,11 @@ data/
 # Environment secret files — NEVER commit real secrets. deploy/.env.example
 # tells operators to `cp .env.example .env` and fill in real POSTGRES_PASSWORD
 # / VAULT_TOKEN / ANTHROPIC_API_KEY / GRAFANA_PASSWORD, so the resulting .env
-# must stay out of history (SECURITY_CONTRACT §6 / §10.6). The negation keeps
+# must stay out of history (secrets must never be committed to git). The negation keeps
 # the *.example templates tracked.
 **/.env
 !**/.env.example
-# DA-M11: the Prometheus scrape bearer (deploy/prometheus/metrics_token) holds
+# the Prometheus scrape bearer (deploy/prometheus/metrics_token) holds
 # the SAME secret as SECUGENT_METRICS_TOKEN; keep it out of history. The tracked
 # template (metrics_token.example) shows operators how to create it.
 deploy/prometheus/metrics_token

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""tests/eval/metrics.py — RISKANALYZER 평가 공용 데이터 모델 + 지표 (G-H6).
+"""tests/eval/metrics.py — RISKANALYZER 평가 공용 데이터 모델 + 지표.
 
 골든셋 데이터 모델(``GoldenEntry``)·로더(``load_golden``)와 순수 지표
 함수(``compute_metrics``·``score_to_risk_level``)를 한 곳에 모은 **단일 출처**다.

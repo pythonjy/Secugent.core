@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Governance + release-notes artifact existence gate (BDP_05 / deploy T1).
+"""Governance + release-notes artifact existence gate.
 
 The public manifest's ``include`` list promises governance files and the runbook
 (§6.3) references the release notes. A drift where the manifest/runbook reference

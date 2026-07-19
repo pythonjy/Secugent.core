@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C3 STEER 인터럽트 코어 테스트 (Lane A — 정지·스냅샷·재개).
+"""STEER 인터럽트 코어 테스트 (Lane A — 정지·스냅샷·재개).
 
 §12 테스트 계획에 따라 3중(단위+속성+시나리오) + 100회 결정성을 커버한다.
 결정적 모듈이므로 §B-4a 95% 커버리지 게이트가 적용된다.
@@ -717,7 +717,7 @@ class TestRunnerPauseResume:
     """runner.py 신규 메서드 통합 테스트."""
 
     def test_request_pause_returns_true_on_first_call(self) -> None:
-        """SG-20260621-17: request_pause는 신규 신호 설정 시 True를 반환한다."""
+        """request_pause는 신규 신호 설정 시 True를 반환한다."""
         from secugent.orchestrator.runner import RunOrchestrator
 
         orch = RunOrchestrator(

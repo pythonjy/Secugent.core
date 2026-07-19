@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 4B · G-H2 — audit retention 단위 + 시나리오 테스트.
+"""Audit retention 단위 + 시나리오 테스트.
 
 결정적 모듈(secugent/audit/retention.py) → 단위 + 속성(별도 파일) + 시나리오
 회귀 + 100회 결정성. 한국어 픽스처(`kb-bank`) 포함(§C-3).

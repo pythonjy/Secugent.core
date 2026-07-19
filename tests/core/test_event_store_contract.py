@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 1 (G-C9) — shared contract-equivalence suite for AsyncEventStore.
+"""Shared contract-equivalence suite for AsyncEventStore.
 
 The SQLite-backed :class:`SqliteAsyncEventStore` (always exercised in CI) and the
 PostgreSQL :class:`PgChainedEventStore` (exercised only when ``DATABASE_URL`` is

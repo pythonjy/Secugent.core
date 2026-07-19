@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C8 — property-based invariants for the HA lease + recovery driver.
+"""Property-based invariants for the HA lease + recovery driver.
 
 Two §B-10 invariants are exercised over arbitrary input:
 

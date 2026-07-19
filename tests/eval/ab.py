@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""ab.py — RISKANALYZER 모델 교체 A/B 증거 하네스 (G-H6 · §B-4b).
+"""ab.py — RISKANALYZER 모델 교체 A/B 증거 하네스 (§B-4b).
 
 §B-4b는 "모델 교체 시 A/B 결과를 PR 본문에 첨부"를 요구한다. 이 도구는 한국어
 골든셋을 **두 모델**로 평가해 비교 가능한 (F1/Precision/Recall) 리포트를 낸다.

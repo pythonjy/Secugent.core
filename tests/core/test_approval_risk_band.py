@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-H8 — ``approval._risk_band`` derivation + APPROVAL_WAIT real-band emission.
+"""``approval._risk_band`` derivation + APPROVAL_WAIT real-band emission.
 
 ``approval.py`` is a §B-4a deterministic module (95% line-coverage gate). The
 new pure helper ``_risk_band`` maps a scope's ``max_risk`` (0-100) to a coarse

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 B3 — AsyncLiveStore async-facade unit + property tests (no Postgres).
+"""AsyncLiveStore async-facade unit + property tests (no Postgres).
 
-The SQLite branch must be BYTE-IDENTICAL to the sync reference (CLAUDE.md §B
+The SQLite branch must be BYTE-IDENTICAL to the sync reference (behaviour and
+ordering must be identical to the synchronous store
 "행동·순서 동일"): same canonical bytes, same chain tail hash, same event ORDER —
 the ``async def`` facade only wraps the identical sync call the live handler makes
 today. The PG branch (``FakeAsyncPgChain`` — real hashing, in-memory) must produce

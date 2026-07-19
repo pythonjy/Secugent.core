@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-H8 — unit tests for the 3 metric-emission helpers.
+"""Unit tests for the 3 metric-emission helpers.
 
 The helpers (``record_llm_tokens`` / ``record_risk_branch`` /
 ``record_policy_block``) are the single label-contract surface for the three

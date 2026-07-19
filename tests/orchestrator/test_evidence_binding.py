@@ -2,7 +2,7 @@
 """N3 boundary tests — connector payload → validated ``Evidence`` (fail-closed).
 
 Exercises :func:`secugent.orchestrator.evidence_binding.evidence_from_connector_payload`
-per spec ``docs/specs/2026-07-12-evidence-orchestration-audit.md`` (INV-N3-4):
+per the evidence-orchestration spec (INV-N3-4):
 malformed evidence must NEVER be admitted (no partial acceptance) and a
 connector response with no ``evidence`` key is a normal empty result.
 """

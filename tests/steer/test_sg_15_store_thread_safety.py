@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-15 회귀 테스트: SQLiteCheckpointStore 스레드 안전성.
+"""회귀 테스트: SQLiteCheckpointStore 스레드 안전성.
 
 concurrent write + resolve가 데이터 손상 없이 완료됨.
 """

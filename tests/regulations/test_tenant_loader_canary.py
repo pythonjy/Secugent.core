@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260601-04 — canary runs must keep tenant-strengthened policy.
+"""Canary runs must keep tenant-strengthened policy.
 
 Korean enterprise context (§C-3): a tenant in a regulated sector hardens the
 organisation base; a canary policy experiment must never silently drop that

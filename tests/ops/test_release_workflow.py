@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structural invariant tests for .github/workflows/release.yml.
 
-BDP_05 item 5 — Signed release pipeline.
+Signed release pipeline.
 
 Invariants asserted:
   I_TRIGGER  — push.tags pattern "v*" present (tag-only trigger).
@@ -415,7 +415,7 @@ class TestManifestGovernancePaths:
     def test_contributing_md_in_include(self) -> None:
         assert self._manifest_includes_glob("CONTRIBUTING.md"), (
             "'CONTRIBUTING.md' not found in any manifest include glob. "
-            "It must be added to release/public_manifest.yaml include (BDP_05 item 5)."
+            "It must be added to release/public_manifest.yaml include."
         )
 
     def test_code_of_conduct_md_in_include(self) -> None:

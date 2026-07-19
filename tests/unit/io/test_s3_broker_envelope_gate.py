@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S3 / G-H15 — EnvelopeReviewGate wired into the broker.
+"""EnvelopeReviewGate wired into the broker.
 
 Tests that:
   1. A "suspend" envelope verdict calls EnvelopeReviewGate.on_suspend().
@@ -158,7 +158,7 @@ def test_suspend_without_review_gate_is_deny() -> None:
 
 
 def test_suspend_with_review_gate_transitions_to_suspended() -> None:
-    """G-H15: suspend verdict calls on_suspend → gate transitions to SUSPENDED."""
+    """Suspend verdict calls on_suspend → gate transitions to SUSPENDED."""
     review_gate = EnvelopeReviewGate()
     transport = _RecordingTransport()
     audit = _RecordingAudit()
@@ -177,7 +177,7 @@ def test_suspend_with_review_gate_transitions_to_suspended() -> None:
 
 
 def test_suspend_emits_hitl_pending_audit_event() -> None:
-    """G-H15 §C-2: suspend emits a gate=hitl audit event into the hash chain."""
+    """§C-2: suspend emits a gate=hitl audit event into the hash chain."""
     review_gate = EnvelopeReviewGate()
     audit = _RecordingAudit()
     b = _broker(gate=_SuspendGate(), review_gate=review_gate, audit=audit)
@@ -250,7 +250,7 @@ def test_review_gate_history_records_approve_and_reject() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SG-20260624-01 (round 2) — per-(tenant, run) gate registry
+# per-(tenant, run) gate registry
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +323,7 @@ def test_no_envelope_gate_no_review_gate_passthrough() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SG-20260624-03 — G-H15 error-branch coverage (broker ~307-308, ~333-334)
+# error-branch coverage (broker ~307-308, ~333-334)
 # ---------------------------------------------------------------------------
 
 

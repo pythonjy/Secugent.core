@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Provenance taint producer — unit + property + determinism (§B-4a, BDP_02 항목 5).
+"""Provenance taint producer — unit + property + determinism (§B-4a).
 
 This is the deterministic axis① (``untrusted_input``) producer. The three
 obligations of a deterministic-core module are exercised here:

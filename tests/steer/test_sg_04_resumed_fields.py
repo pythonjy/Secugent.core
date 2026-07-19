@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-04 회귀 테스트: emit_resume_from_checkpoint가 §C-2 필드를 포함함."""
+"""회귀 테스트: emit_resume_from_checkpoint가 §C-2 필드를 포함함."""
 
 from __future__ import annotations
 

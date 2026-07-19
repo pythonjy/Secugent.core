@@ -47,7 +47,7 @@ async def test_env_backend_rotate_not_supported() -> None:
 # Other backends — both are now fully implemented (no longer skeletons):
 #
 # * VaultSecretsBackend (C-3) — tests/unit/test_vault_secrets_backend.py
-# * AwsSecretsManagerBackend (S8a/G-M7) — tests/core/test_aws_secrets_backend.py
+# * AwsSecretsManagerBackend — tests/core/test_aws_secrets_backend.py
 #
 # rotate() remains a deliberate ``NotImplementedError`` on AWS (backend-side
 # rotation is managed out-of-band, mirroring Vault), so a thin contract test for

@@ -42,7 +42,7 @@ DEFAULT_TEST_TENANT = TenantId("legacy-default")
 
 
 # ---------------------------------------------------------------------------
-# Environment default (DA-C2 blast-radius mitigation)
+# Environment default (production-default blast-radius mitigation)
 # ---------------------------------------------------------------------------
 
 
@@ -50,7 +50,7 @@ DEFAULT_TEST_TENANT = TenantId("legacy-default")
 def _default_dev_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force ``SECUGENT_ENV=dev`` for the suite unless a test overrides it.
 
-    DA-C2 inverts the production default: an unset ``SECUGENT_ENV`` now means
+    The inverted production default means an unset ``SECUGENT_ENV`` now means
     *production* (fail-closed), so the permissive ``X-User-*`` dev header shim is
     no longer reachable by default. The existing header-auth / RBAC test-suite was
     written against the old ``unset ⇒ dev`` default, so without this fixture every

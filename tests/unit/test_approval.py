@@ -322,13 +322,13 @@ def test_connector_action_rejected_by_plan_wide_approval(
         approval_service.verify_for_step(granted.id, step, observed_nonce=granted.nonce)
 
 
-# -- SG-20260604-04: connector_action carve-out must be DEDICATED, not membership ---
+# -- connector_action carve-out must be DEDICATED, not membership ---
 
 
 def test_connector_action_rejected_by_multi_step_scope(
     approval_service: ApprovalService,
 ) -> None:
-    # Regression for SG-20260604-04. A connector_action must be authorized ONLY
+    # Regression: a connector_action must be authorized ONLY
     # by a scope pinned to this exact step alone (single-element step_ids ==
     # [step.id]). A multi-step scope that merely *contains* the connector step id
     # (e.g. step_ids=[connector_step, other_step]) is NOT dedicated and must be
@@ -431,7 +431,7 @@ def test_connector_action_dedicated_scope_respects_expiry(
         )
 
 
-# -- SG-20260604-04: non-connector approval logic must NOT regress -----------
+# -- non-connector approval logic must NOT regress -----------
 
 
 def test_non_connector_multi_step_scope_still_authorizes(
@@ -479,7 +479,7 @@ def test_non_connector_action_type_not_allowed_still_rejected(
         approval_service.verify_for_step(granted.id, base_step, observed_nonce=granted.nonce)
 
 
-# -- SG-20260604-04: determinism of the carve-out decision (§B-4a, 100 runs) --
+# -- determinism of the carve-out decision (§B-4a, 100 runs) --
 
 
 def test_action_allowed_carve_out_is_deterministic_100x() -> None:

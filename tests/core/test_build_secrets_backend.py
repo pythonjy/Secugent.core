@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S4 G-H13 — ``build_secrets_backend`` boot factory.
+"""``build_secrets_backend`` boot factory.
 
 Selects a fail-closed Vault backend when Vault is configured (token OR AppRole),
 else the plaintext ``EnvSecretsBackend``. When Vault IS configured but the
 transport/auth fails, it raises ``VaultBackendError`` — it must NEVER silently
-fall back to plaintext env (fail-closed, SECURITY_CONTRACT §6).
+fall back to plaintext env (fail-closed: a configured secret backend must never
+silently degrade to plaintext).
 
 ``hvac`` is not installed in CI, so the AppRole-login path injects a fake hvac
 module via ``sys.modules`` (mirroring tests/unit/test_vault_secrets_backend.py).
@@ -271,7 +272,7 @@ def test_build_never_returns_env_backend_when_vault_configured(monkeypatch: pyte
 
 
 # --------------------------------------------------------------------------- #
-# S8a — AWS Secrets Manager selection branch (G-M7)
+# AWS Secrets Manager selection branch
 # --------------------------------------------------------------------------- #
 
 

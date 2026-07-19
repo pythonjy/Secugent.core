@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""test_risk_eval.py — 한국어 위험 평가 골든셋 F1 게이트 (Stage 8D).
+"""test_risk_eval.py — 한국어 위험 평가 골든셋 F1 게이트.
 
 §B-4b 요구사항:
   - 골든 데이터셋 회귀 테스트
@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-# G-H6: metrics + level mapping now live in the canonical eval module
+# metrics + level mapping now live in the canonical eval module
 # (tests/eval/metrics.py), shared with conftest and scripts/eval_ab.py.
 # E1 fix: get_default_client is imported at module level so the E1 regression
 # test can verify its presence. The old code imported LLMClient (ABC) and

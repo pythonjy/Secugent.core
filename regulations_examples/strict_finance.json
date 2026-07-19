@@ -1,0 +1,93 @@
+{
+  "version": "strict-finance-1.0.0",
+  "banned_paths": [
+    {
+      "rule_id": "fin-pf-confidential",
+      "pattern": "*/pf심사자료/대외비/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "PF 심사자료 대외비 일체 접근 차단."
+    },
+    {
+      "rule_id": "fin-customer-id",
+      "pattern": "*/고객신원자료/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "고객 신원 자료(개인정보) 접근 차단."
+    },
+    {
+      "rule_id": "fin-credit-models",
+      "pattern": "*/신용평가모델/*",
+      "actions": ["file_write", "desktop"],
+      "severity": "high",
+      "hard_block": true,
+      "description": "신용평가 모델 파일 직접 수정 차단."
+    },
+    {
+      "rule_id": "fin-deny-confidential",
+      "pattern": "*/confidential/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true
+    },
+    {
+      "rule_id": "fin-deny-d-confidential",
+      "pattern": "d:/confidential/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true
+    }
+  ],
+  "domain_policy": {
+    "rule_id": "fin-domain-policy",
+    "mode": "allow_list",
+    "domains": ["bok.or.kr", "kfb.or.kr", "fss.or.kr", "internal-finance.example.com"],
+    "allow_subdomains": false,
+    "block_ip_literal": true,
+    "block_punycode": true,
+    "hard_block": true,
+    "description": "금융권 운영 허용 도메인. 서브도메인·IP·punycode 모두 차단."
+  },
+  "banned_commands": [
+    {
+      "rule_id": "fin-deny-mail-bulk",
+      "pattern": "\\b(mail|send|forward).*\\b(@gmail\\.com|@naver\\.com|@kakao\\.com|@daum\\.net)\\b",
+      "severity": "critical",
+      "hard_block": true,
+      "description": "개인 메일/메신저로의 대외비 송신 차단."
+    },
+    {
+      "rule_id": "fin-deny-bulk-export",
+      "pattern": "\\b(scp|rsync|curl\\s+-T|ftp)\\b",
+      "severity": "critical",
+      "hard_block": true,
+      "description": "외부 대량 전송 명령 차단."
+    },
+    {
+      "rule_id": "fin-deny-rm-rf",
+      "pattern": "\\brm\\s+-rf\\b",
+      "severity": "critical",
+      "hard_block": true
+    }
+  ],
+  "data_labels": [
+    {
+      "rule_id": "fin-label-pf-public",
+      "label": "pf-public",
+      "path_patterns": ["*/pf심사자료/공개/*"],
+      "allowed_actions": ["file_read", "file_write"],
+      "severity": "low",
+      "hard_block": false
+    },
+    {
+      "rule_id": "fin-label-customer-credit",
+      "label": "credit-grade",
+      "path_patterns": ["*/신용등급/*"],
+      "allowed_actions": ["file_read"],
+      "severity": "high",
+      "hard_block": true
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 B3 — PG chain body round-trip invariance (the false-break guards).
+"""PG chain body round-trip invariance (the false-break guards).
 
 A PostgreSQL ``event_chain`` row stores the §C-2 link as ``body_canonical`` TEXT
 and the event itself as JSONB. Two PG behaviours would make a *naive* verifier

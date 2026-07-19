@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-H7 — SBOM pollution regression tests.
+"""SBOM pollution regression tests.
 
 Verifies that ``scripts/gen_sbom.py`` emits a deterministic, closure-scoped
 CycloneDX SBOM — not a dump of the whole dev-venv site-packages.

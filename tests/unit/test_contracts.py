@@ -74,7 +74,7 @@ def test_plan_holds_steps_and_risks() -> None:
     assert plan.risks[0].severity == "medium"
 
 
-# -- Plan AI-generated provenance (DA-H2 §C-1) ----------------------------
+# -- Plan AI-generated provenance (§C-1) ----------------------------
 
 
 def test_plan_provenance_defaults() -> None:
@@ -152,7 +152,7 @@ def test_approval_scope_max_risk_bounds() -> None:
         )
 
 
-# -- ApprovalScope.rule_of_two_axes (DA-M4 §C-2) --------------------------
+# -- ApprovalScope.rule_of_two_axes (§C-2) --------------------------
 
 
 def _scope(**kw: object) -> ApprovalScope:

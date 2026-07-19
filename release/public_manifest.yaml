@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# BDP_05 item 2 — public/private release manifest (secugent-core v0.1.0).
+# Public/private release manifest (secugent-core v0.1.0).
 #
 # This file is the SINGLE SOURCE OF TRUTH for what ships in the public OSS repo.
 # `scripts/check_public_release.py` reads it and enforces, fail-closed:
@@ -32,12 +32,12 @@
 # ALSO listed under `exclude` as defence-in-depth (closure risks R1-R4).
 
 include:
-  # --- Fully-PUBLIC_CORE packages (spec §3.2) ---
+  # --- Fully-PUBLIC_CORE packages ---
   - "secugent/__init__.py"
   - "secugent/config.py"
   - "secugent/core/**"
   - "secugent/audit/**"
-  # secugent/db/** = SQLite->PG migration lib + sync store-facade (DA-C1). Imports
+  # secugent/db/** = SQLite->PG migration lib + sync store-facade. Imports
   # only secugent.core.* (incl. the already-public event_store_pg) + audit.hash_chain
   # — a clean PUBLIC_CORE closure, classified PUBLIC_CORE in test_open_core_boundary.
   - "secugent/db/**"
@@ -50,7 +50,7 @@ include:
   - "secugent/io/**"
   - "secugent/prompts/**"
   - "secugent/deploy/**"
-  # --- MIXED packages — file-level include (spec §3.3) ---
+  # --- MIXED packages — file-level include ---
   # orchestrator: every Core file EXCEPT sub_agent-coupled members. runner.py and
   # errors.py SHIP: they are import-closed (the optional secugent.cost quota tier
   # is referenced only under TYPE_CHECKING / lazily on the enforcement path), and
@@ -65,7 +65,7 @@ include:
   - "secugent/orchestrator/adapters_langchain.py"
   - "secugent/orchestrator/envelope_gate.py"
   - "secugent/orchestrator/errors.py"
-  # evidence_binding.py (N3 갭 ④): pure connector-payload → grounding.Evidence
+  # evidence_binding.py: pure connector-payload → grounding.Evidence
   # re-validator. Imports ONLY secugent.core.grounding (PUBLIC_CORE) — import-closed,
   # ships as Core control-layer alongside core/grounding.py and tools/connectors/retrieval.py.
   - "secugent/orchestrator/evidence_binding.py"
@@ -89,6 +89,9 @@ include:
   - "secugent/models/catalog.py"
   # --- Project root + docs + tests + tooling ---
   - "examples/**"
+  # REGULATIONS example fixtures — Korean finance/public policy samples (no secrets),
+  # loaded by secugent.core.regulations in the unit tests. Public-appropriate data.
+  - "regulations_examples/**"
   - "tests/**"
   - "scripts/gen_sbom.py"
   - "scripts/check_public_release.py"
@@ -117,7 +120,7 @@ include:
   # Release notes shipped so runbook §6.3 `gh release create --notes-file
   # release/RELEASE_NOTES_v0.1.0.md` resolves inside the extracted public repo.
   - "release/RELEASE_NOTES_v0.1.0.md"
-  # --- Governance / contribution infrastructure (BDP_05 item 5) ---
+  # --- Governance / contribution infrastructure ---
   # These files are required for an OSS public repo (contributor guide, code of
   # conduct, issue/PR templates). They contain NO internal strategy or secrets.
   # release.yml already ships via ".github/workflows/**" above; the four paths
@@ -128,7 +131,7 @@ include:
   - ".github/PULL_REQUEST_TEMPLATE.md"
 
 exclude:
-  # --- Fully-ENTERPRISE packages — never public (spec §3.4) ---
+  # --- Fully-ENTERPRISE packages — never public ---
   - "secugent/enterprise/**"
   - "secugent/compliance/**"
   - "secugent/cost/**"
@@ -141,7 +144,7 @@ exclude:
   # --- MIXED-package Enterprise-coupled files (closure risks R3-R4) ---
   # sub_agent.py (token-budget enforcement) and models/router.py (cost-ledger
   # routing) carry real Enterprise cost-tier LOGIC and stay private on a LICENSE
-  # basis, independent of import mechanism. W8/A4 made their secugent.cost import
+  # basis, independent of import mechanism. Their secugent.cost import was made
   # lazy (TYPE_CHECKING + function-local), so they are now import-closed and would
   # PASS the closure check — do NOT promote them to the include set on that basis:
   # they must not ship because they embed the commercial quota/routing logic. Their
@@ -217,12 +220,12 @@ exclude:
   - "tests/cli/test_serve.py"
   # MIXED test dirs — exclude only the individual files that import a private
   # tier (the Core tests in the same dir still ship). Enumerated by the AST
-  # closure scan over tests/ (BDP_05 item 2).
+  # closure scan over tests/.
   - "tests/audit/test_kms_providers.py"
   - "tests/audit/test_merkle_root_kms_signed.py"
-  # B5 KMS provider test imports secugent.enterprise.kms (private Enterprise tier,
+  # The KMS provider test imports secugent.enterprise.kms (private Enterprise tier,
   # excluded above) — would ModuleNotFoundError under the extracted public repo
-  # (Invariant I8). Added W7 (import-closure round; G2 8→0).
+  # (Invariant I8).
   - "tests/audit/test_b5_kms_provider.py"
   # test_build_kms_provider.py drives the Enterprise VaultTransitProvider (imports
   # secugent.enterprise.kms lazily) — fails at runtime under the standalone public
@@ -232,7 +235,19 @@ exclude:
   - "tests/orchestrator/test_runner_quota.py"
   - "tests/steer/test_steer_failed_hash_chain.py"
   - "tests/steer/test_steer_hash_chain.py"
-  # SG-20260621 regression tests import secugent.api (private tier) — not public.
+  # These STEER tests do a function-local import of secugent.agents.sub_agent
+  # (private SUB tier, excluded above) — ModuleNotFoundError under the extracted
+  # public `pytest -q` (Invariant I8), mirroring the other sub_agent importers.
+  - "tests/steer/test_interrupt_integration.py"
+  - "tests/steer/test_sg_14_lock_safety.py"
+  # tests/sdk/test_decorators.py imports HitlDecision/HitlTimeoutError from the private
+  # secugent.agents.sub_agent (module-level) — I8 ModuleNotFoundError standalone.
+  - "tests/sdk/test_decorators.py"
+  # These two read deploy/** artifacts (compose/helm/.env.example; deploy/prometheus
+  # alerts) that are PRIVATE in the OSS distribution — FileNotFoundError standalone.
+  - "tests/ops/test_deploy_auth_env_contract.py"
+  - "tests/observability/test_alert_metric_contract.py"
+  # STEER regression tests import secugent.api (private tier) — not public.
   - "tests/steer/test_sg_03_cross_tenant.py"
   - "tests/steer/test_sg_06_ws_audit.py"
   - "tests/steer/test_sg_08_checkpoint_path.py"
@@ -247,25 +262,25 @@ exclude:
   # the public deploy set (only Dockerfile + docker-compose.yml + .env.example
   # do). They read those excluded files unconditionally, so under the extracted
   # repo they would FileNotFoundError. They test Enterprise-only deploy artifacts
-  # and are excluded wholesale (BDP_05 item 2 fixer round 2).
+  # and are excluded wholesale.
   - "tests/deploy/**"
   # Tests that import the private SUB agent (secugent.agents.sub_agent — token-
   # budget enforcement, eager secugent.cost import, NOT shipped). They would
   # ModuleNotFoundError under the extracted repo's `pytest -q` (Invariant I8).
   # The excluded-sibling import-closure check now flags these automatically; they
-  # are enumerated here as the primary deny (BDP_05 item 2 fixer round 2).
+  # are enumerated here as the primary deny.
   - "tests/agents/test_dispatcher_envelope.py"
   - "tests/agents/test_dispatcher_parallel.py"
-  # W5-c partial-approval end-to-end test drives the real Dispatcher+SubAgent
+  # The partial-approval end-to-end test drives the real Dispatcher+SubAgent
   # (secugent.agents.sub_agent, private SUB tier) to prove deferred steps never
   # dispatch — excluded (I8 ModuleNotFoundError under the extracted public repo).
   - "tests/agents/test_w5c_partial_dispatch.py"
   - "tests/agents/test_envelope_threading.py"
   - "tests/agents/test_sub_agent_envelope.py"
-  # W5-f agent-eval harness tests import scripts.agent_evals.* (dispatcher_check /
+  # The agent-eval harness tests import scripts.agent_evals.* (dispatcher_check /
   # golden / runner / merger_check) — a private, manifest-excluded eval tier. They
   # would ModuleNotFoundError under the extracted public `pytest -q` (Invariant I8)
-  # and leak eval-harness internals. Added W7 (import-closure round; G2 8→0).
+  # and leak eval-harness internals.
   - "tests/agents/test_eval_dispatcher_invariants.py"
   - "tests/agents/test_eval_harness.py"
   - "tests/agents/test_eval_merger_invariants.py"
@@ -273,15 +288,15 @@ exclude:
   - "tests/core/test_rule_of_two_scenario.py"
   # test_llm_sovereign_w6 imports secugent.api.main (private API tier, excluded
   # above) to exercise _build_llm_settings sovereign-model boot wiring — would
-  # ModuleNotFoundError under the extracted public repo (Invariant I8). Added W7.
+  # ModuleNotFoundError under the extracted public repo (Invariant I8).
   - "tests/core/test_llm_sovereign_w6.py"
-  # G-H8 six-metric integration test: drives sub_agent (RISK_BRANCH/POLICY_BLOCK)
+  # The six-metric integration test: drives sub_agent (RISK_BRANCH/POLICY_BLOCK)
   # and models.router (LLM_TOKENS), both Enterprise-coupled (eager secugent.cost
   # import) and manifest-excluded. The public set keeps the closure-clean helper
   # unit tests (tests/observability/test_metrics_emit.py); only this end-to-end
   # scenario imports the private tiers and is excluded (Invariant I8).
   - "tests/observability/test_metrics_six_emit.py"
-  # D3-RR-01 structlog decision-gate producer end-to-end tests: both drive the
+  # The structlog decision-gate producer end-to-end tests: both drive the
   # private SUB agent (secugent.agents.sub_agent) to assert the parallel stream
   # is populated at the real decision points. The closure-clean helper unit
   # tests (tests/observability/test_decision_gate_producer.py) stay public; only
@@ -289,7 +304,7 @@ exclude:
   - "tests/observability/test_sub_agent_structlog_producer.py"
   - "tests/orchestrator/test_adapter_envelope.py"
   - "tests/orchestrator/test_adapters.py"
-  # DA-H2 marker test drives secugent.agents.sub_agent (private SUB tier) to prove
+  # The AI-identification marker test drives secugent.agents.sub_agent (private SUB tier) to prove
   # the AI-identification marker on the live step.completed surface — excluded
   # (would ModuleNotFoundError under the extracted public `pytest -q`, Invariant I8).
   - "tests/orchestrator/test_da_h2_marker.py"
@@ -306,5 +321,5 @@ exclude:
   - "tests/unit/test_event_store.py"
   - "tests/unit/io/test_connector_action_step.py"
   - "tests/unit/io/test_credential_broker.py"
-  # S3 prompt-cache test imports private-tier secugent.cost (excluded from OSS).
+  # The prompt-cache test imports private-tier secugent.cost (excluded from OSS).
   - "tests/unit/test_s3_prompt_cache.py"

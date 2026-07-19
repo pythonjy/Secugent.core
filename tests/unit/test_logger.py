@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for secugent.core.logger — DA-M14 coverage gate (90%).
+"""Unit tests for secugent.core.logger — coverage gate (90%).
 
 Covers previously-uncovered branches:
 - L91: _luhn_valid double-digit reduction (value -= 9)

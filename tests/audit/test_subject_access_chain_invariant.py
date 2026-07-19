@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-M5 INV-6 — 정보주체 열람권 export 는 감사 해시체인을 변경하지 않는다.
+"""INV-6 — 정보주체 열람권 export 는 감사 해시체인을 변경하지 않는다.
 
 export 는 체인을 *읽기만* 한다(``compute_chain_hash``/``canonical``/chain 테이블 미접근).
 det ``9b99932311ebcc94`` 불변을 다음으로 증명한다:

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """In-memory fakes mirroring the async PG chained store — NO Postgres.
 
-These let the DA-C1 seam, sync bridge, and migration be unit-tested deterministically
+These let the live-store seam, sync bridge, and migration be unit-tested deterministically
 on every host. The chain math uses the REAL
 :mod:`secugent.audit.hash_chain` functions (``canonical``/``stored_view``/
 ``compute_chain_hash``/``GENESIS``), so a fake chain reproduces the SQLite/PG chain

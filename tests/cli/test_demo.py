@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for ``secugent demo`` / ``run_demo`` (BDP Phase 1 item 3).
+"""Tests for ``secugent demo`` / ``run_demo``.
 
-Layers (CLAUDE.md §B-4):
+Layers (multi-layer test strategy):
 
 * unit — ``run_demo()`` yields >=1 HARD BLOCK + >=1 HITL approval + N audit
   events; every audit event satisfies the C-2 schema (I2); the demo writes a
@@ -36,7 +36,7 @@ from secugent.cli.demo import (
 
 
 def test_run_demo_blocks_and_approves_and_audits() -> None:
-    """One round: >=1 HARD BLOCK, >=1 HITL approval, >=1 audit event (BDP 3.8.1)."""
+    """One round: >=1 HARD BLOCK, >=1 HITL approval, >=1 audit event."""
     result = run_demo()
     assert isinstance(result, DemoResult)
     assert len(result.blocked) >= 1
@@ -135,7 +135,7 @@ def _canonical(result: DemoResult) -> str:
 
 
 def test_run_demo_is_deterministic_across_runs() -> None:
-    """Fixed-seed mock demo → byte-identical output (BDP 3.8 determinism)."""
+    """Fixed-seed mock demo → byte-identical output (determinism)."""
     first = _canonical(run_demo())
     for _ in range(5):
         assert _canonical(run_demo()) == first

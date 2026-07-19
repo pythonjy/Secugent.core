@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-M5 — 정보주체 열람권(Right-to-Access) export 3중 테스트.
+"""정보주체 열람권(Right-to-Access) export 3중 테스트.
 
 결정적 모듈(`audit/export.py`)의 ``SubjectAccessExporter`` 를 단위 + 속성기반 +
 시나리오(회귀) 로 검증한다. 핵심 불변식(spec Part B):

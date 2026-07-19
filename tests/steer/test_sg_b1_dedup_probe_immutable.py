@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BLOCKING-1 회귀 테스트: dedup 프로브가 다른 request_id 도착 시 엔진 상태를 오염시키지 않음.
+"""회귀 테스트: dedup 프로브가 다른 request_id 도착 시 엔진 상태를 오염시키지 않음.
 
-SG-20260621-17 dedup 판정에서 set_paused(mutate)를 호출하던 코드가
+dedup 판정에서 set_paused(mutate)를 호출하던 코드가
 다른 request_id를 가진 두 번째 요청의 stop_mode/_pause_request_id/_pause_actor를
 덮어쓰는 버그를 재현하고 고정한다.
 

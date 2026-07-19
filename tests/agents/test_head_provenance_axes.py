@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-H2 — HeadAgent stamps immutable AI-generated provenance on every Plan.
+"""HeadAgent stamps immutable AI-generated provenance on every Plan.
 
 §C-1 (AI 산출물 식별표시) + 한국 AI 기본법 워터마크. Proves:
 
@@ -130,7 +130,7 @@ def test_provenance_is_deterministic_100x(
 def test_missing_risk_section_harness_intact(
     temp_event_store: EventStore, approval_service: ApprovalService
 ) -> None:
-    # The DA-H2 stamp must not weaken the §B-2 risk-section re-prompt harness:
+    # The provenance stamp must not weaken the risk-section re-prompt harness:
     # a plan with no risks still exhausts attempts and raises (head_agent.py:404).
     no_risks = json.dumps({"steps": [], "risks": []})
     head = _head(

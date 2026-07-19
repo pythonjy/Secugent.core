@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-20 회귀 테스트: DispatcherAdapter._runner 역배선 통합 검증.
+"""회귀 테스트: DispatcherAdapter._runner 역배선 통합 검증.
 
 결함 요약: AppState 생성 시 DispatcherAdapter가 RunOrchestrator보다 먼저 생성되어
 _runner=None으로 남는다. _handle_pause_result에서 _runner.notify_pause_completed가

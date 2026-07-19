@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-10 회귀 테스트: dispatch 실패 시 checkpoint가 재시도 가능."""
+"""회귀 테스트: dispatch 실패 시 checkpoint가 재시도 가능."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""conftest.py — tests/eval 패키지 공용 픽스처 (Stage 8D).
+"""conftest.py — tests/eval 패키지 공용 픽스처.
 
 골든셋 JSONL 로드 및 RiskAnalyzer mock 여부 감지 픽스처를 제공한다.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-# G-H6: data model + loader now live in the canonical eval module (single source
+# data model + loader now live in the canonical eval module (single source
 # of truth shared with test_risk_eval.py and scripts/eval_ab.py). Re-exported
 # here so existing ``from tests.eval.conftest import GoldenEntry`` imports stay
 # valid (behaviour unchanged).

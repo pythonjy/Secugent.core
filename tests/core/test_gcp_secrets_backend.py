@@ -243,7 +243,7 @@ async def test_get_field_on_non_json_secret_raises_not_found() -> None:
 
 
 async def test_get_field_on_non_json_secret_does_not_leak_secret() -> None:
-    """SECURITY_CONTRACT §6: the secret payload must NOT appear in the error."""
+    """The security contract requires the secret payload never appear in the error."""
     backend = _backend(return_data=b"SECRET_PLAINTEXT_MATERIAL not json")
     with pytest.raises(SecretNotFoundError) as exc_info:
         await backend.get(f"{_HANA_SECRET_ID_SIMPLE}#api_key")
@@ -324,7 +324,7 @@ def test_gcp_backend_error_type_separation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# get() — no credential/secret leak in error or __cause__ (SECURITY_CONTRACT §6)
+# get() — no credential/secret leak in error or __cause__ (secrets must never surface in errors)
 # ---------------------------------------------------------------------------
 
 
@@ -654,7 +654,7 @@ _FIXED_ERROR_TEMPLATE = (
 async def test_property_upstream_message_never_leaks_in_error(msg: str) -> None:
     """The upstream exception message body must NEVER appear in the raised error.
 
-    Only the secret_id + exception type name may surface (SECURITY_CONTRACT §6).
+    Only the secret_id + exception type name may surface (secrets must never surface in errors).
     The ``from None`` discipline means the cause is also not attached.
     """
     backend = GcpSecretManagerBackend(

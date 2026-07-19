@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 — SyncPgEventStore bridge unit tests (fake async store, no Postgres).
+"""SyncPgEventStore bridge unit tests (fake async store, no Postgres).
 
 Proves the sync facade drives the async store on a DEDICATED loop/thread:
 writes land, the call is deadlock-free, a wedged backend times out (fail-closed),

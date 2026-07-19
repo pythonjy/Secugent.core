@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Concurrency regression — STEER ``add_session_patch`` ↔ SUB-worker ``evaluate``.
 
-Regression for SG-20260606-10 (Stage 3 G-H4 review, iteration 1).
+Regression for a live-constraint concurrency race found in review.
 
-G-H4 routes a STEER ``add_constraint`` to the **live per-run** ``OversightEngine``
+The live-constraint path routes a STEER ``add_constraint`` to the **live per-run** ``OversightEngine``
 that this run's SUB workers are concurrently reading. STEER writes from one thread
 (``POST /steer`` → ``asyncio.to_thread`` → ``add_session_patch``) while the SUB
 workers iterate the same ``OversightEngine._patches`` list inside the matchers

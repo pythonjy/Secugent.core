@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for ``OversightMiddleware`` + ``wrap_tool`` (BDP_02 item 4, §4.8 §4).
+"""Tests for ``OversightMiddleware`` + ``wrap_tool`` (§4.8 §4).
 
 Boundary check (the critical 'no bypass' invariant): EVERY request path through
 the middleware passes the same core oversight gate and emits a §C-2 audit event.

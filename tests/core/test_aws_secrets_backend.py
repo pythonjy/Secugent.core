@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S8a G-M7 — AwsSecretsManagerBackend unit + property + scenario tests.
+"""AwsSecretsManagerBackend unit + property + scenario tests.
 
 ``boto3`` is not installed in CI, so we never make a live AWS call; instead we
 inject a ``MagicMock`` client via the ``client=`` DI slot for most tests, and the
@@ -143,7 +143,7 @@ async def test_get_field_on_non_json_secret_raises_not_found() -> None:
 async def test_get_field_on_non_json_secret_does_not_leak_secret() -> None:
     # A JSONDecodeError message echoes a snippet of the offending input — i.e. the
     # SECRET — so the not-found error must NOT chain it as __cause__ and must not
-    # echo the secret in its own message (SECURITY_CONTRACT §6).
+    # echo the secret in its own message (secrets must never surface in errors).
     backend = _backend(_client(get_return={"SecretString": "AKIASECRETPLAINTEXT not json"}))
     with pytest.raises(SecretNotFoundError) as exc_info:
         await backend.get(f"{_KB_SECRET_ARN}#api_key")

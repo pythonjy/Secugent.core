@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 — SQLite→PG migration round-trip + chain re-verification (fake PG sink).
+"""SQLite→PG migration round-trip + chain re-verification (fake PG sink).
 
 Korean-context fixtures (§C-3): finance/public tenant ids (``kb-fin``,
 ``mois-gov``). The end-to-end migration against a REAL Postgres is infra-gated and
@@ -171,7 +171,7 @@ async def test_empty_source_migrates_trivially(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     not (os.getenv("DATABASE_URL") and is_pg_available()),
-    reason="DA-C1: live SQLite→PG cutover needs a staged Postgres; SQLite is the "
+    reason="live SQLite→PG cutover needs a staged Postgres; SQLite is the "
     "dev/air-gap default — not asserted in CI (no false green).",
 )
 async def test_live_pg_migration_round_trip(tmp_path: Path) -> None:  # pragma: no cover - infra-gated

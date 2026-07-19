@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""test_eval_ab.py — A/B 모델 교체 증거 하네스 (G-H6 · §B-4b).
+"""test_eval_ab.py — A/B 모델 교체 증거 하네스 (§B-4b).
 
-상위 명세: docs/specs/2026-06-18-gh6-eval-ci-gate.md
+상위 명세: 모듈 스펙 (eval CI 게이트)
 
 순수 계산부(evaluate/run_ab)를 fake predictor로 오프라인·결정적으로 검증한다.
 실모델 경로(LLM 호출)는 자격증명이 필요하므로 여기서 테스트하지 않는다(§B-4b).

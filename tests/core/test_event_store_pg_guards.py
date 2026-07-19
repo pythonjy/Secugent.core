@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 single-writer fence + DA-M2 tenant second-guard (no Postgres).
+"""Single-writer fence + tenant second-guard (no Postgres).
 
 Both guards are pure policy checks that run BEFORE any SQL, so they are unit-tested
 against a bare ``PgEventStore`` (built via ``__new__`` to skip the engine) and a
@@ -50,11 +50,11 @@ def _bare_store() -> PgEventStore:
     store = PgEventStore.__new__(PgEventStore)
     store._writer_guard = None
     store._worker_id = None
-    store._leader_lease = None  # DA-C1 B2: durable-lease fence (disarmed in guard tests)
+    store._leader_lease = None  # durable-lease fence (disarmed in guard tests)
     return store
 
 
-# --- DA-C1 INV-C1-4: single-writer fence ----------------------------------- #
+# --- INV-C1-4: single-writer fence ----------------------------------- #
 
 
 async def test_assert_writer_noop_when_unwired() -> None:
@@ -75,7 +75,7 @@ async def test_assert_writer_allows_leader() -> None:
     await store._assert_writer()  # leader ⇒ proceeds
 
 
-# --- DA-C1 INV-C1-4: REAL arbiter coverage (not a hardcoded fake) ----------- #
+# --- INV-C1-4: REAL arbiter coverage (not a hardcoded fake) ----------- #
 #
 # The _GrantGuard/_DenyGuard fakes above only prove that PgEventStore._assert_writer
 # plumbs through to guard.assert_writer — they CANNOT reveal whether the wired
@@ -135,7 +135,7 @@ async def test_pg_style_worker_agnostic_lease_cannot_fence_standby() -> None:
     await standby_store._assert_writer()
 
 
-# --- DA-M2: request-scoped tenant second-guard over FORCE RLS --------------- #
+# --- Request-scoped tenant second-guard over FORCE RLS --------------- #
 
 
 async def test_bind_tenant_mismatch_fails_closed() -> None:

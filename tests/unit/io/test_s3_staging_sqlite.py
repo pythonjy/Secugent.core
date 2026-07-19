@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""S3 / G-M6 — SQLiteStagedEffectStore unit + property + determinism tests.
+"""SQLiteStagedEffectStore unit + property + determinism tests.
 
 Triple-coverage (§B-4a):
   1. Unit tests (scenarios / regression)
@@ -248,7 +248,7 @@ def test_audit_events_emitted(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# G-M6 invariant: staged rows survive process restart (I-E)
+# invariant: staged rows survive process restart (I-E)
 # ---------------------------------------------------------------------------
 
 
@@ -558,7 +558,7 @@ def test_sqlite_store_abort_unknown_id_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SG-20260624-04: timezone normalization + legacy-schema NULL on reload
+# timezone normalization + legacy-schema NULL on reload
 # (_row_to_staged branches 591->592/592, 597->598/598, 595->599)
 # ---------------------------------------------------------------------------
 

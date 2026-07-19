@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 4B · G-H2 — audit retention 속성 기반 테스트 (hypothesis).
+"""Audit retention 속성 기반 테스트 (hypothesis).
 
 검증 불변조건:
 * I2: retain_days 윈도 안의 sealed day는 어떤 입력에서도 절대 purge 후보에 없다.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for secugent.core.tenancy and secugent.core.event_store_async.
 
-DA-M14 (W5-f): covers missed branches to reach the 90% core+audit+regulations gate.
+Covers missed branches to reach the 90% core+audit+regulations gate.
 
 Missed lines targeted:
 - tenancy.py L64: TenantId.__new__ with non-str raises ValueError

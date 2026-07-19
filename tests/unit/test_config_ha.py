@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""W1 supporting edit B — OrchestratorConfig HA fields.
+"""OrchestratorConfig HA fields.
 
-The lease-wiring lane (G-C8) reads ``ha_enabled`` / ``ha_backend`` off
+The lease-wiring lane reads ``ha_enabled`` / ``ha_backend`` off
 ``OrchestratorConfig`` via ``getattr`` so it does not hard-depend on fields a
 sibling lane is still adding. This test pins the fields' existence + safe
 defaults (HA off, single-node) so the wiring stops needing ``# type: ignore``.

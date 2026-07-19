@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260624-02 regression — concurrent commit must not double-send (I-C/I-D).
+"""Concurrent-commit regression — a commit must not double-send (I-C/I-D).
 
 Two threads commit the SAME staged_id simultaneously. With ``check_same_thread=
 False`` the SQLite store is shared across both. The fix requires a CAS state

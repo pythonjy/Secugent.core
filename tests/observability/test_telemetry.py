@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 항목 7 — opt-in adoption telemetry collector tests.
+"""Opt-in adoption telemetry collector tests.
 
 The collector is privacy-respecting, DEFAULT-OFF, and on-prem local. These
 tests pin the spec's invariants:

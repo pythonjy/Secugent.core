@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Public-release manifest gate — deterministic-module test suite (BDP_05 item 2).
+"""Public-release manifest gate — deterministic-module test suite.
 
-This module is a DETERMINISTIC gate, so it carries the CLAUDE.md §B-4a triple:
+This module is a DETERMINISTIC gate, so it carries the deterministic-module triple:
 
 * **unit** — each pure function (load_manifest, is_public_path,
   assert_import_closure, scan_forbidden_content) against hand-built inputs,
@@ -151,7 +151,7 @@ def test_closure_red_injection_api_main_is_violation() -> None:
 
 
 def test_closure_sub_agent_is_now_import_closed() -> None:
-    """Regression (W8/A4): agents/sub_agent.py was made import-closed — the
+    """Regression: agents/sub_agent.py was made import-closed — the
     optional secugent.cost token-budget tier is now TYPE_CHECKING / lazy, so its
     top-level import no longer couples the private cost tier (mirrors runner.py /
     errors.py). It must NOT be a private-tier closure violation any more. Whether
@@ -167,7 +167,7 @@ def test_closure_red_injection_synthetic_private_import_is_violation(tmp_path: P
     """Positive coverage for the closure checker itself: a file that eagerly
     imports a private tier (secugent.cost.accounting) MUST be flagged. Uses a
     synthetic file so the coverage does not depend on any real module staying
-    "red" (W8/A4 closed the last real red, sub_agent.py). Both ``import`` and
+    "red" (a prior cleanup closed the last real red, sub_agent.py). Both ``import`` and
     ``from`` forms are exercised."""
     for src in (
         "import secugent.cost.accounting\n",

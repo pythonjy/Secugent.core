@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the ``secugent verify --deploy`` preflight doctor (W8 B1).
+"""Tests for the ``secugent verify --deploy`` preflight doctor.
 
 Triple test strategy for a deterministic CLI module (§B-4a):
 
 * **Unit** — every check's fire boundary AND pass boundary (severities + report.ok).
 * **Property (hypothesis)** — arbitrary env dicts never raise and yield only
   findings (invariant P1); same env → identical report (determinism).
-* **Scenario regression** — 6 fixtures reproducing the W6 blocker configs map to
+* **Scenario regression** — 6 fixtures reproducing the documented blocker configs map to
   the expected firing-severity set. At least one Korean-message assertion (§C-3).
 * **Determinism 100x** — one env snapshot → byte-identical ``PreflightReport``.
 
@@ -154,7 +154,7 @@ def test_kms_signer_degrades_to_info_when_settings_unavailable(
 
 
 # --------------------------------------------------------------------------- #
-# 2. audit-persistence (W6-B, high)
+# 2. audit-persistence (high)
 # --------------------------------------------------------------------------- #
 
 
@@ -177,7 +177,7 @@ def test_audit_persistence_passes_with_database_url() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 3. ha-audit-fork (W6-A, high)
+# 3. ha-audit-fork (high)
 # --------------------------------------------------------------------------- #
 
 
@@ -205,7 +205,7 @@ def test_ha_fork_passes_when_ha_off() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 4. tool-surface (W6-H, info)
+# 4. tool-surface (info)
 # --------------------------------------------------------------------------- #
 
 
@@ -225,7 +225,7 @@ def test_tool_surface_passes_with_one_surface_set() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 5. domestic-model (W6-LLM, high)
+# 5. domestic-model (high)
 # --------------------------------------------------------------------------- #
 
 
@@ -260,7 +260,7 @@ def test_domestic_model_passes_without_endpoint() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 6. ldap-tls (W6-F, high)
+# 6. ldap-tls (high)
 # --------------------------------------------------------------------------- #
 
 
@@ -343,7 +343,7 @@ def test_findings_carry_korean_guidance() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Scenario regression — 6 W6 blocker fixtures → expected firing severities
+# Scenario regression — 6 blocker fixtures → expected firing severities
 # --------------------------------------------------------------------------- #
 
 _SCENARIOS: dict[str, tuple[dict[str, str], str, str]] = {

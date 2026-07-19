@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for AgentConfig tree validation (SG-20260602-05/06)."""
+"""Unit tests for AgentConfig tree validation."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_enabled_head_and_sub_accepted() -> None:
 
 
 def test_all_nodes_disabled_rejected() -> None:
-    """SG-20260602-06: a config with every node disabled has nothing to route."""
+    """A config with every node disabled has nothing to route."""
     with pytest.raises(ValidationError, match="enabled HEAD"):
         AgentConfig(tenant_id="acme", nodes=[_head(enabled=False), _sub(enabled=False)])
 
@@ -57,7 +57,7 @@ def test_no_head_rejected() -> None:
 
 
 def test_sub_actor_prefix_enforced() -> None:
-    """SG-20260602-05 path: validator still rejects a bad actor prefix."""
+    """Validator still rejects a bad actor prefix."""
     with pytest.raises(ValidationError, match="must start with 'sub:'"):
         AgentNode(id="x", kind="sub", actor="researcher", name="X", parent_id="head")
 

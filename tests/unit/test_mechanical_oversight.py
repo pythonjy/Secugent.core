@@ -461,7 +461,7 @@ def test_default_blocks_rm_rf() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DA-M14 (W5-f): pause/resume accessor methods — §B-4a 95% gate
+# pause/resume accessor methods — §B-4a 95% gate
 #
 # Lines 325-338, 342-343, 347-348, 368-369 were uncovered; adding direct
 # tests for the pause-state accessors to reach the >=95% coverage gate.

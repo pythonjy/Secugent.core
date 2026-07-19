@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 — ``secugent migrate-store`` CLI precondition / fail-closed wiring.
+"""``secugent migrate-store`` CLI precondition / fail-closed wiring.
 
 The end-to-end migration needs a real Postgres (infra-gated, covered by
 ``tests/db/test_migrate_sqlite_to_pg.py::test_live_pg_migration_round_trip``).

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 1 (G-C9) — SqliteAsyncEventStore delegation unit tests.
+"""SqliteAsyncEventStore delegation unit tests.
 
 Pins the *adapter contract*: every async method maps to the right sync
 ``EventStore`` method with the right argument names/positions, and the HA-lease

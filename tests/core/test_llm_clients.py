@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 item 10 — domestic/sovereign LLM adapter contract tests.
+"""Domestic/sovereign LLM adapter contract tests.
 
 Covers (§10.8 + §B-8/§B-10):
 * contract conformance (each adapter is an LLMClient; generate returns str),
@@ -427,7 +427,7 @@ def test_get_default_client_prod_builds_concrete(
 def test_get_default_client_dev_builds_concrete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # DA-C2: dev must be OPTED IN explicitly (unset ⇒ production, fail-closed). The
+    # dev must be OPTED IN explicitly (unset ⇒ production, fail-closed). The
     # old form delenv'd SECUGENT_ENV and relied on the fail-OPEN "dev" default —
     # encoding the very inconsistency finding #5 flagged. Set it explicitly.
     monkeypatch.setenv("SECUGENT_ENV", "dev")
@@ -478,7 +478,7 @@ def test_get_default_client_dev_no_model_is_mock(
 def test_get_default_client_unset_env_is_production_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DA-C2 INV-C2-1 regression (finding #5): an UNSET ``SECUGENT_ENV`` is
+    """INV-C2-1 regression (finding #5): an UNSET ``SECUGENT_ENV`` is
     PRODUCTION here too, exactly like the auth layer — not the old fail-OPEN "dev".
 
     With no API key, no concrete domestic model, and the env var unset, an operator

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_02 항목 6 — 한국어 정책 팩 + REGULATIONS 변환 안정화 (결정적 모듈, §B-4a).
+"""한국어 정책 팩 + REGULATIONS 변환 안정화 (결정적 모듈, §B-4a).
 
 3중 테스트 하네스:
 
@@ -246,7 +246,7 @@ _SEV_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 # Shared, SMALL rule_id pool so base/pack rule_ids COLLIDE — this is what forces
 # hypothesis through the in-place strengthen-vs-reject branch of ``_merge`` (the
 # only place a relaxation can occur). A disjoint namespace would degenerate the
-# property to a trivial set-union check (BDP item 6 findings 2/6/8).
+# property to a trivial set-union check (shared-namespace merge findings).
 _SHARED_BP_IDS = st.sampled_from(["bp-α", "bp-β", "bp-γ"])
 _SHARED_DL_IDS = st.sampled_from(["dl-α", "dl-β", "dl-γ"])
 _SHARED_CMD_IDS = st.sampled_from(["cmd-α", "cmd-β", "cmd-γ"])
@@ -435,7 +435,7 @@ _RELAX_AXES = [
     "cmd_pattern",
     "cmd_hard_block",
     "domain_allow_widen",
-    # SG-20260608-03 (finding 1/2/4): allow_subdomains is a matcher dimension.
+    # allow_subdomains is a matcher dimension.
     # deny_list True->False un-blocks subdomains of denied hosts; allow_list
     # False->True permits subdomains of allowlisted hosts. Both are relaxation.
     "domain_denylist_subdomain_toggle",

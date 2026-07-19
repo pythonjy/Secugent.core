@@ -52,6 +52,7 @@ is Enterprise -> Core only.
 | `secugent/identity/` | ENTERPRISE | 옵셔널 add-on, 향후 릴리스로 유보. |
 | `secugent/integrations/` | ENTERPRISE | 옵셔널 외부 커넥터(예: Slack 승인), 향후 릴리스로 유보. |
 | `secugent/desktop/` | ENTERPRISE | 데스크톱 자동화 최후수단 add-on, 향후 릴리스로 유보. |
+| `secugent/playbooks/` | ENTERPRISE | 데스크톱 셸 플레이북. `router.py`가 `secugent.api.security`, `wire.py`가 `secugent.api.main`(AppState)을 import → api 티어(Enterprise)에 결합돼 단방향 의존 경계상 Core 불가, 공개 제외. |
 | `ui/` | ENTERPRISE | 엔터프라이즈 콘솔 프론트엔드. |
 
 > `secugent/tests/`는 `__init__.py` 없는 빈 디렉터리(Python 패키지 미성립, setuptools

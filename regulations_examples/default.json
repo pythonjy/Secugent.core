@@ -1,0 +1,73 @@
+{
+  "version": "default-1.0.0",
+  "banned_paths": [
+    {
+      "rule_id": "deny-confidential",
+      "pattern": "*/confidential/*",
+      "actions": ["file_read", "file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "Any directory literally named 'confidential' is off-limits."
+    },
+    {
+      "rule_id": "deny-system-roots",
+      "pattern": "c:/windows/system32/*",
+      "actions": ["file_write", "desktop"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "Block writes to system32."
+    },
+    {
+      "rule_id": "deny-secrets-dir",
+      "pattern": "*/secrets/*",
+      "actions": ["file_read", "file_write"],
+      "severity": "critical",
+      "hard_block": true,
+      "description": "Any directory named 'secrets' is off-limits."
+    }
+  ],
+  "domain_policy": {
+    "rule_id": "default-domain-policy",
+    "mode": "allow_list",
+    "domains": ["example.com", "docs.python.org", "anthropic.com"],
+    "allow_subdomains": true,
+    "block_ip_literal": true,
+    "block_punycode": true,
+    "hard_block": true,
+    "description": "Default allow-list. Subdomains allowed; punycode and IP literals blocked."
+  },
+  "banned_commands": [
+    {
+      "rule_id": "deny-rm-rf",
+      "pattern": "\\brm\\s+-rf\\b",
+      "severity": "critical",
+      "hard_block": true,
+      "description": "Block destructive recursive deletion."
+    },
+    {
+      "rule_id": "deny-format-disk",
+      "pattern": "\\bformat\\s+[a-z]:",
+      "severity": "critical",
+      "hard_block": true,
+      "description": "Block disk formatting."
+    },
+    {
+      "rule_id": "deny-net-share-create",
+      "pattern": "\\bnet\\s+share\\b",
+      "severity": "high",
+      "hard_block": true,
+      "description": "Block network-share creation."
+    }
+  ],
+  "data_labels": [
+    {
+      "rule_id": "label-confidential",
+      "label": "confidential",
+      "path_patterns": ["*/대외비/*", "*/internal-only/*"],
+      "allowed_actions": ["file_read"],
+      "severity": "high",
+      "hard_block": false,
+      "description": "Confidential data may be read by SUB but not written/exported."
+    }
+  ]
+}

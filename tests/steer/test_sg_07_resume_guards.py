@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-07 회귀 테스트: terminal run resume 거부 + cross-run checkpoint 거부."""
+"""회귀 테스트: terminal run resume 거부 + cross-run checkpoint 거부."""
 
 from __future__ import annotations
 

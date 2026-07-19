@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-02 회귀 테스트: paused_at_step_id → checkpoint 기록 + steer.paused 발행.
+"""회귀 테스트: paused_at_step_id → checkpoint 기록 + steer.paused 발행.
 
 DispatcherAdapter._handle_pause_result 가 체크포인트를 SQLiteCheckpointStore에
 기록하고 ChainedEventStore에 steer.paused 이벤트를 발행하는지 검증한다.
@@ -75,7 +75,7 @@ class TestDispatcherAdapterHasCheckpointStore:
 
         sig = inspect.signature(DispatcherAdapter.__init__)
         assert "checkpoint_store" in sig.parameters, (
-            "DispatcherAdapter.__init__에 checkpoint_store 파라미터 없음 — SG-20260621-02 미구현"
+            "DispatcherAdapter.__init__에 checkpoint_store 파라미터 없음 — 미구현"
         )
 
     def test_audit_chain_param_exists(self) -> None:
@@ -84,7 +84,7 @@ class TestDispatcherAdapterHasCheckpointStore:
 
         sig = inspect.signature(DispatcherAdapter.__init__)
         assert "audit_chain" in sig.parameters, (
-            "DispatcherAdapter.__init__에 audit_chain 파라미터 없음 — SG-20260621-02 미구현"
+            "DispatcherAdapter.__init__에 audit_chain 파라미터 없음 — 미구현"
         )
 
     def test_handle_pause_result_method_exists(self) -> None:
@@ -92,7 +92,7 @@ class TestDispatcherAdapterHasCheckpointStore:
         from secugent.orchestrator.adapters import DispatcherAdapter
 
         assert hasattr(DispatcherAdapter, "_handle_pause_result"), (
-            "DispatcherAdapter._handle_pause_result 없음 — SG-20260621-02 미구현"
+            "DispatcherAdapter._handle_pause_result 없음 — 미구현"
         )
         assert asyncio.iscoroutinefunction(DispatcherAdapter._handle_pause_result), (
             "_handle_pause_result는 async 메서드여야 한다"

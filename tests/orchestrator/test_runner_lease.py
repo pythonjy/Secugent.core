@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""G-C8 — RunOrchestrator HA lease gating (acquire on dispatch, release on exit).
+"""RunOrchestrator HA lease gating (acquire on dispatch, release on exit).
 
 The lease_manager param is OPTIONAL: when None the orchestrator behaves exactly
 as before (covered by tests/unit/test_orchestrator.py). These tests cover the

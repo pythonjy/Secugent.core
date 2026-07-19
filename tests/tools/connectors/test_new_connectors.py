@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""BDP_04 §14d — groupware / SAP / docs connectors (deterministic, §B-4a-ish).
+"""Groupware / SAP / docs connectors (§14d; deterministic, §B-4a-ish).
 
 These three connectors follow the EXISTING slack/notion/jira pattern (a duck-typed
 :class:`~secugent.tools.connectors.base.Connector`: ``name`` + ``actions`` +

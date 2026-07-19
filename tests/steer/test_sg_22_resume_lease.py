@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-22 회귀 테스트: resume_from_checkpoint HA lease 재획득.
+"""회귀 테스트: resume_from_checkpoint HA lease 재획득.
 
 리스 미보유 노드가 resume → dispatch 미호출 (fail-closed 단일-리더).
 """

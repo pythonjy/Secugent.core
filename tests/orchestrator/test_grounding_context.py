@@ -2,7 +2,7 @@
 """N1 (생산자 브리지) — connector payloads → run-context ``grounding_evidence`` seed.
 
 Exercises :func:`secugent.orchestrator.grounding_context.seed_grounding_evidence`
-per spec ``docs/specs/2026-07-14-grounding-producer-bridge.md``: the pure,
+per the grounding-producer-bridge spec: the pure,
 fail-closed, all-or-nothing producer that is the orchestrator-layer symmetric
 counterpart of the consumer :func:`secugent.orchestrator.runner._bind_plan_evidence`.
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for secugent.core.event_bus.EventBus.
 
-DA-M14 (W5-f): coverage gate 90% for secugent.core — event_bus.py was at 49%
+Coverage gate 90% for secugent.core — event_bus.py was at 49%
 because all async subscribe/publish/unsubscribe paths were untested by unit tests.
 This file covers the full EventBus surface to bring core coverage above 90%.
 """
@@ -110,7 +110,7 @@ async def test_multiple_subscribers_fan_out() -> None:
 
 
 async def test_serialise_redacts_payload() -> None:
-    """_serialise() redacts the payload dict (SECURITY_CONTRACT §5)."""
+    """_serialise() redacts the payload dict (event payloads must not leak secrets)."""
     bus = EventBus()
     sub = await bus.subscribe()
     evt = _make_event()

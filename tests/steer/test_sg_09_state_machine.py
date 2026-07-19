@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-09/20/21 회귀 테스트: 상태기계 정상 생애주기.
+"""회귀 테스트: 상태기계 정상 생애주기.
 
 iter1 테스트는 INTERRUPT_REQUESTED→RESUMING 불법 전이를 기대값으로 박제했다.
 iter2 수정 후에는 정상 생애주기(pause→checkpoint→resume 성공)가 작동해야 한다:
@@ -87,7 +87,7 @@ def _make_checkpoint(run_id: str, store: SQLiteCheckpointStore) -> object:
 
 
 class TestNormalLifecycle:
-    """pause→checkpoint→resume 성공 생애주기 — 이것이 G-C3 P0 계약이다."""
+    """pause→checkpoint→resume 성공 생애주기 — 이것이 P0 계약이다."""
 
     def test_pause_transitions_to_interrupt_requested(self) -> None:
         """request_pause 성공 → INTERRUPT_REQUESTED 전이."""
@@ -239,7 +239,7 @@ class TestStateMachineRejections:
 
 
 # ---------------------------------------------------------------------------
-# SG-20260621-21: 엔진 None 시 상태 전이 없이 raise
+# 엔진 None 시 상태 전이 없이 raise
 # ---------------------------------------------------------------------------
 
 

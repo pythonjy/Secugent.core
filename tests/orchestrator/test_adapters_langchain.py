@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the LangChain oversight adapter (BDP_02 item 4, §4.5/§4.6 I3).
+"""Tests for the LangChain oversight adapter (§4.5/§4.6 I3).
 
 Two invariants:
 

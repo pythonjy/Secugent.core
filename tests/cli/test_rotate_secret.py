@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit suite for ``secugent rotate-secret`` (DA-H6) — honest rotation wrapper.
+"""Unit suite for ``secugent rotate-secret`` — honest rotation wrapper.
 
 INV-ROTATE-1: the wrapper never fakes success. Env is an explicit no-op (exit 0,
 "nothing changed in-process"); Vault/AWS surface their out-of-band message and

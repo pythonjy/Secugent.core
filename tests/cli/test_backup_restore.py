@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DETERMINISTIC suite for ``secugent backup`` / ``restore`` (DA-H6, §B-4a).
+"""DETERMINISTIC suite for ``secugent backup`` / ``restore`` (§B-4a).
 
 The restore re-verification path is tied to audit/hash_chain integrity, so this
 exercises it three ways:

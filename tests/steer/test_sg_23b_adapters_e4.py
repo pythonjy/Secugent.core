@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-23b 회귀 테스트: adapters.py E4 steer.failed §C-2 필수 필드 검증.
+"""회귀 테스트: adapters.py E4 steer.failed §C-2 필수 필드 검증.
 
 결함 요약: DispatcherAdapter._handle_pause_result의 E4 경로(checkpoint_store.write 예외)에서
 생성하는 steer.failed 이벤트 payload에 §C-2 필수 필드

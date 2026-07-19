@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 — store-selection seam unit tests (no infra).
+"""Store-selection seam unit tests (no infra).
 
 ``select_live_store`` is the pure, config-driven decision: ``DATABASE_URL`` unset
 ⇒ SQLite (dev/air-gap default, unchanged → the determinism path is untouched);

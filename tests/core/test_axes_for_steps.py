@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-M4 §B-4a triple for the deterministic ``rule_of_two_axes`` stamp.
+"""Deterministic-module triple for the deterministic ``rule_of_two_axes`` stamp.
 
 ``axes_for_steps`` (secugent.core.rule_of_two) is the pure function an
 :class:`ApprovalScope` stamps into its immutable ``rule_of_two_axes`` field at
 approval-creation time, and the HITL approve/reject emitters read back verbatim
-into the §C-2 audit payload. This file covers the deterministic-module triple
-required by CLAUDE.md §B-4a:
+into the audit payload. This file covers the mandatory deterministic-module
+triple (unit + property + regression) at the 95% coverage gate:
 
 * unit — axis union over steps, honest empty, provenance-aware classification;
 * property (hypothesis) — emitted axes are a deterministic, sorted/unique

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-16 회귀 테스트: runner.py 협력자 Any 타입 → Protocol 도입.
+"""회귀 테스트: runner.py 협력자 Any 타입 → Protocol 도입.
 
 mypy --strict 하에 engine/checkpoint_store/steer_handler 협력자가
 구체 Protocol 타입으로 좁혀졌는지 확인한다.
@@ -31,14 +31,10 @@ class TestOversightEngineProtocol:
     """OversightEngineProtocol: set_paused / is_paused 시그니처 존재."""
 
     def test_protocol_has_set_paused(self) -> None:
-        assert hasattr(OversightEngineProtocol, "set_paused"), (
-            "OversightEngineProtocol에 set_paused 없음 (SG-20260621-16)"
-        )
+        assert hasattr(OversightEngineProtocol, "set_paused"), "OversightEngineProtocol에 set_paused 없음"
 
     def test_protocol_has_is_paused(self) -> None:
-        assert hasattr(OversightEngineProtocol, "is_paused"), (
-            "OversightEngineProtocol에 is_paused 없음 (SG-20260621-16)"
-        )
+        assert hasattr(OversightEngineProtocol, "is_paused"), "OversightEngineProtocol에 is_paused 없음"
 
     def test_concrete_engine_satisfies_protocol(self) -> None:
         """OversightEngine이 Protocol을 만족함."""
@@ -55,14 +51,10 @@ class TestCheckpointStoreProtocol:
     """CheckpointStoreProtocol: write / resolve 시그니처 존재."""
 
     def test_protocol_has_write(self) -> None:
-        assert hasattr(CheckpointStoreProtocol, "write"), (
-            "CheckpointStoreProtocol에 write 없음 (SG-20260621-16)"
-        )
+        assert hasattr(CheckpointStoreProtocol, "write"), "CheckpointStoreProtocol에 write 없음"
 
     def test_protocol_has_resolve(self) -> None:
-        assert hasattr(CheckpointStoreProtocol, "resolve"), (
-            "CheckpointStoreProtocol에 resolve 없음 (SG-20260621-16)"
-        )
+        assert hasattr(CheckpointStoreProtocol, "resolve"), "CheckpointStoreProtocol에 resolve 없음"
 
     def test_sqlite_store_satisfies_protocol(self, tmp_path: Any) -> None:
         """SQLiteCheckpointStore가 Protocol을 만족함."""
@@ -82,7 +74,7 @@ class TestSteerHandlerProtocol:
 
     def test_protocol_has_emit_resume_from_checkpoint(self) -> None:
         assert hasattr(SteerHandlerProtocol, "emit_resume_from_checkpoint"), (
-            "SteerHandlerProtocol에 emit_resume_from_checkpoint 없음 (SG-20260621-16)"
+            "SteerHandlerProtocol에 emit_resume_from_checkpoint 없음"
         )
 
     def test_concrete_handler_satisfies_protocol(self) -> None:

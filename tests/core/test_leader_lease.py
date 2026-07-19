@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DA-C1 B2 — durable leader-lease decision logic (unit + property, no Postgres).
+"""Durable leader-lease decision logic (unit + property, no Postgres).
 
 The SQL primitives (``acquire_leader_lease`` / ``renew_leader_lease`` /
 ``assert_leader_lease``) are thin wrappers over the PURE decision

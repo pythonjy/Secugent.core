@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SG-20260621-01 회귀 테스트: runner._engine_registry vs AppState._run_engines 분리 문제.
+"""회귀 테스트: runner._engine_registry vs AppState._run_engines 분리 문제.
 
 external_engine_registry가 설정되면 request_pause가 AppState의 엔진을 찾는다.
 """

@@ -148,16 +148,33 @@ def test_closure_red_injection_api_main_is_violation() -> None:
     assert any("secugent/api/main.py imports private tier" in v for v in violations)
 
 
-def test_closure_red_injection_sub_agent_cost_is_violation() -> None:
-    """agents/sub_agent.py eagerly imports secugent.cost.accounting (token-budget
-    enforcement) -> private-tier closure violation. (runner.py/errors.py used to
-    be the red here, but they were made import-closed and now SHIP; sub_agent.py
-    is the remaining mixed file that genuinely couples the cost tier.)"""
-    leaked = REPO_ROOT / "secugent" / "agents" / "sub_agent.py"
-    if not leaked.is_file():  # pragma: no cover - only in the extracted public repo
-        pytest.skip("secugent/agents/sub_agent.py is excluded from the public set (extract)")
-    violations = assert_import_closure(_SAMPLE_PUBLIC_PKGS, [leaked])
-    assert any("imports private tier secugent.cost.accounting" in v for v in violations)
+def test_closure_sub_agent_is_now_import_closed() -> None:
+    """Regression (W8/A4): agents/sub_agent.py was made import-closed — the
+    optional secugent.cost token-budget tier is now TYPE_CHECKING / lazy, so its
+    top-level import no longer couples the private cost tier (mirrors runner.py /
+    errors.py). It must NOT be a private-tier closure violation any more. Whether
+    the git-extraction manifest now SHIPS it is a separate manifest decision; this
+    only asserts closure."""
+    path = REPO_ROOT / "secugent" / "agents" / "sub_agent.py"
+    if not path.is_file():  # pragma: no cover - only in the extracted public repo
+        pytest.skip("secugent/agents/sub_agent.py not present in this checkout")
+    assert assert_import_closure(_SAMPLE_PUBLIC_PKGS, [path]) == []
+
+
+def test_closure_red_injection_synthetic_private_import_is_violation(tmp_path: Path) -> None:
+    """Positive coverage for the closure checker itself: a file that eagerly
+    imports a private tier (secugent.cost.accounting) MUST be flagged. Uses a
+    synthetic file so the coverage does not depend on any real module staying
+    "red" (W8/A4 closed the last real red, sub_agent.py). Both ``import`` and
+    ``from`` forms are exercised."""
+    for src in (
+        "import secugent.cost.accounting\n",
+        "from secugent.cost.accounting import CostLedger\n",
+    ):
+        red = tmp_path / "red.py"
+        red.write_text(src, encoding="utf-8")
+        violations = assert_import_closure(_SAMPLE_PUBLIC_PKGS, [red])
+        assert any("imports private tier secugent.cost.accounting" in v for v in violations), src
 
 
 def test_closure_runner_is_now_import_closed() -> None:
@@ -377,20 +394,10 @@ def test_excluded_existing_files_excludes_public_and_keeps_private(
 
     files = public_files(manifest, REPO_ROOT)
     excluded = _excluded_existing_files(manifest, REPO_ROOT, files)
-    # ``_excluded_existing_files`` reports present-but-excluded sources, so its
-    # positive membership only holds where the private file is physically on disk
-    # (the monorepo). In a standalone public extract these private tiers are absent
-    # by manifest exclusion — their absence from the set is CORRECT, not a failure.
-    # Assert membership only for the files that actually exist here.
-    for private in (
-        "secugent/agents/sub_agent.py",
-        "secugent/models/router.py",
-        "secugent/api/main.py",
-    ):
-        if (REPO_ROOT / private).is_file():
-            assert private in excluded, private
-    # Now-shipping files must NOT be in the excluded-existing set (Core assertion —
-    # holds in both the monorepo and the extract).
+    assert "secugent/agents/sub_agent.py" in excluded
+    assert "secugent/models/router.py" in excluded
+    assert "secugent/api/main.py" in excluded
+    # Now-shipping files must NOT be in the excluded-existing set.
     assert "secugent/orchestrator/runner.py" not in excluded
     assert "secugent/orchestrator/errors.py" not in excluded
     assert "secugent/core/regulations.py" not in excluded

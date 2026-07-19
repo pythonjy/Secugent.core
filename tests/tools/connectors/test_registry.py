@@ -513,5 +513,13 @@ async def test_transport_with_real_slack_connector_via_registry() -> None:
         run_id="r1",
         profile=ExecutionProfile.EXTERNAL_BROKERED,
     )
-    result = await transport.dispatch(request)
+
+    # S5: the real SlackConnector now fails closed without a transport, so inject
+    # an echo seam — this proves the gate routed to a REAL transport call (the
+    # removed mock-success fallback would have returned ok=True with no transport).
+    async def _echo(*, action: ConnectorAction, principal: Principal, secret_value: str) -> dict[str, Any]:
+        assert secret_value, "credential must reach the transport seam"
+        return {"ok": True}
+
+    result = await transport.dispatch(request, http_transport=_echo)
     assert result.ok is True

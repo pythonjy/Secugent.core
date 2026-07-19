@@ -252,6 +252,13 @@ class OversightEngine:
         # ``evaluate_effect``). None ⇒ deny-by-default for the effect surface; the
         # legacy ``evaluate(step)`` path is unaffected either way.
         self._compiled_policy = compiled_policy
+        # G-C3 additive: pause 신호 상태 (INV-R6: contextvar 절대 금지 — 명시 전달)
+        # 이 필드는 _patches_lock으로 보호되며 copy-on-write가 아니라 단순 bool/str.
+        # 스레드 경계에서 소실되는 contextvar 방식을 절대 쓰지 않는다.
+        self._pause_active: bool = False
+        self._pause_request_id: str | None = None
+        self._pause_actor: str | None = None
+        self._stop_mode: bool = False  # D-J: mode:stop 전용 플래그
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -286,6 +293,80 @@ class OversightEngine:
         """
         with self._patches_lock:
             self._patches = [*self._patches, patch]
+
+    # ------------------------------------------------------------------ #
+    # G-C3: Pause 신호 API (INV-R6 — contextvar 절대 금지)
+    # ------------------------------------------------------------------ #
+
+    def set_paused(
+        self,
+        *,
+        paused: bool,
+        request_id: str,
+        actor: str,
+        stop_mode: bool = False,
+    ) -> bool:
+        """pause 신호를 설정/해제한다 (INV-R6: contextvar 금지).
+
+        R2 멱등: 동일 request_id이면 False 반환 (no-op).
+        첫 설정: True 반환.
+        _patches_lock 보호 — thread-safe.
+
+        Args:
+            paused: True = 정지 신호, False = 해제.
+            request_id: 멱등성 키.
+            actor: 요청 주체 (§9.1).
+            stop_mode: True이면 D-J mode:stop 경로 (재개 불가).
+
+        Returns:
+            True = 상태가 변경됨 (첫 설정),
+            False = 멱등 (동일 request_id로 이미 설정됨).
+        """
+        with self._patches_lock:
+            if paused and self._pause_active and self._pause_request_id == request_id:
+                # R2: 동일 request_id 중복 → 멱등
+                return False
+            self._pause_active = paused
+            if paused:
+                self._pause_request_id = request_id
+                self._pause_actor = actor
+                self._stop_mode = stop_mode
+            else:
+                self._pause_request_id = None
+                self._pause_actor = None
+                self._stop_mode = False
+        return True
+
+    def is_paused(self) -> bool:
+        """현재 pause 신호 여부 (_patches_lock 보호)."""
+        with self._patches_lock:
+            return self._pause_active
+
+    def is_stop_mode(self) -> bool:
+        """D-J: mode:stop 경로 여부 (_patches_lock 보호)."""
+        with self._patches_lock:
+            return self._stop_mode
+
+    def pause_snapshot(self) -> tuple[bool, bool]:
+        """_patches_lock 하에서 두 pause 필드를 원자적으로 읽는다 (SG-20260621-14).
+
+        Returns:
+            tuple[is_paused, is_stop_mode]
+        """
+        with self._patches_lock:
+            return self._pause_active, self._stop_mode
+
+    def current_pause_request_id(self) -> str | None:
+        """현재 활성 pause request_id를 순수 read로 반환한다 (BLOCKING-1).
+
+        엔진 상태를 **변경하지 않는** 순수 read-only 프로브다.
+        dedup 판정에서 set_paused(mutate) 대신 이 메서드를 써야 한다.
+
+        Returns:
+            현재 _pause_request_id (pause 신호가 없으면 None).
+        """
+        with self._patches_lock:
+            return self._pause_request_id
 
     def evaluate(self, step: Step) -> OversightResult:
         """Evaluate ``step`` against regulations + session patches.

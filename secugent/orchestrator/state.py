@@ -82,6 +82,12 @@ class RunRecord:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     state_history: list[tuple[RunState, datetime]] = field(default_factory=list)
+    # G-C3 D-A: STEER interrupt sub-state. The umbrella RunState stays EXECUTING;
+    # this field tracks fine-grained interrupt lifecycle (INTERRUPT_REQUESTED →
+    # PAUSING → PAUSED_SNAPSHOTTED → RESUMING → RUNNING, etc.).
+    # Stored via context["_extras"]["interrupt_state"] in both backends so no
+    # SQLite schema migration is needed. Restored by _restore_extras_to_record().
+    interrupt_state: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +101,7 @@ class RunRecord:
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "state_history": [{"state": s.value, "ts": t.isoformat()} for s, t in self.state_history],
+            "interrupt_state": self.interrupt_state,
         }
 
 
@@ -422,7 +429,7 @@ def _row_to_record(row: tuple[Any, ...]) -> RunRecord:
     """Decode a ``runs`` table row (the canonical 10-column projection) into a
     :class:`RunRecord`. Shared by :meth:`SQLiteRunStateStore._get_locked` and
     :meth:`SQLiteRunStateStore.list_open_runs` so the column order lives once."""
-    return RunRecord(
+    rec = RunRecord(
         run_id=row[0],
         command=row[1],
         context=json.loads(row[2]),
@@ -434,10 +441,13 @@ def _row_to_record(row: tuple[Any, ...]) -> RunRecord:
         finished_at=datetime.fromisoformat(row[8]) if row[8] else None,
         state_history=_history_from_json(row[9]),
     )
+    # G-C3 D-A: restore interrupt_state from context["_extras"] (no extra SQL column).
+    _restore_extras_to_record(rec)
+    return rec
 
 
 def _clone_record(rec: RunRecord) -> RunRecord:
-    return RunRecord(
+    cloned = RunRecord(
         run_id=rec.run_id,
         command=rec.command,
         context=dict(rec.context),
@@ -448,4 +458,20 @@ def _clone_record(rec: RunRecord) -> RunRecord:
         started_at=rec.started_at,
         finished_at=rec.finished_at,
         state_history=list(rec.state_history),
+        interrupt_state=rec.interrupt_state,
     )
+    return cloned
+
+
+def _restore_extras_to_record(rec: RunRecord) -> None:
+    """G-C3 D-A: After deserialisation from SQLite/memory, lift _extras fields
+    back onto their typed RunRecord attributes.
+
+    interrupt_state is stored in context["_extras"]["interrupt_state"] (not as a
+    dedicated SQLite column) to avoid schema migration. This function is the
+    single canonical path that restores it so callers don't each need to know the
+    storage convention.
+    """
+    extras: dict[str, Any] = rec.context.get("_extras", {})
+    if rec.interrupt_state is None and "interrupt_state" in extras:
+        rec.interrupt_state = extras["interrupt_state"]

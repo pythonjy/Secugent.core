@@ -122,9 +122,27 @@ class Dispatcher:
         # before any worker starts (state-diagram invariant 1).
         self._sanity_check_approval(plan, approval)
 
+        # DA-H4 (W5-c, Finding 1) — partial approval EXECUTION enforcement.
+        # The approval scope authorises EXACTLY ``scope.step_ids``; for a partial
+        # Plan Review approval that is a strict SUBSET of ``plan.steps``. The
+        # dispatcher must dispatch ONLY that approved subset — a deferred
+        # (unselected) step must never be handed to a SUB. Relying on the core
+        # ``_enforce_scope`` to reject it later is NOT sufficient: the SubAgent
+        # catches that ``ApprovalError`` and downgrades it to a fresh step-scoped
+        # HITL (auto-approved in dev / re-prompted in prod), so the deferral would
+        # be silently ignored (INV-W5C-1 / INV-W5C-5). Filtering here keeps deferred
+        # steps un-approved AND un-executed (fail-closed, deny-by-default §A-2).
+        #
+        # A full approval mints ``scope.step_ids == every plan step id`` (see
+        # ``HeadAgent.request_plan_approval``), so this filter is a NO-OP on the
+        # legacy/full path — only a genuine partial scope narrows the set.
+        approved_ids = set(approval.scope.step_ids)
+        dispatched_steps = [s for s in plan.steps if s.id in approved_ids]
+        deferred_ids = sorted(s.id for s in plan.steps if s.id not in approved_ids)
+
         # Deterministic grouping: preserve plan.steps order per actor.
         groups: dict[str, list[Step]] = {}
-        for step in plan.steps:
+        for step in dispatched_steps:
             actor = plan.assigned_subs.get(step.id, step.actor)
             groups.setdefault(actor, []).append(step)
 
@@ -136,6 +154,9 @@ class Dispatcher:
                 "plan_id": plan.id,
                 "approval_id": approval.id,
                 "groups": {a: [s.id for s in steps] for a, steps in groups.items()},
+                # Audit transparency: a partial approval records which plan steps
+                # were deferred (left un-approved/un-executed). Empty on full approval.
+                "deferred_step_ids": deferred_ids,
             },
         )
 

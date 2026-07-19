@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -53,6 +53,7 @@ __all__ = [
     "ConnectorAlreadyRegistered",
     "ConnectorNotFound",
     "ConnectorRegistry",
+    "register_production_connectors",
 ]
 
 _log = logging.getLogger("secugent.tools.connectors.registry")
@@ -272,3 +273,25 @@ class ConnectorRegistry:
             ):
                 resolved[action] = compensator
         return resolved
+
+
+def register_production_connectors(
+    registry: ConnectorRegistry, *, bindings: Sequence[ConnectorBinding]
+) -> None:
+    """Register a batch of production connector bindings (S5 wire factory).
+
+    The integration step assembles each :class:`ConnectorBinding` (the connector
+    instance + its tenant :class:`ConnectorPolicy` + the ``secret_name`` to inject)
+    and registers them all here instead of open-coding the loop in ``api/main.py``
+    (S5 lane boundary — this module never imports ``api``).
+
+    Fail-closed (§A-2.2): a duplicate connector name raises
+    :class:`ConnectorAlreadyRegistered` (a connector cannot be silently overridden —
+    that would be a credential-swap path), and an empty/invalid binding raises
+    :class:`ConnectorRegistryError`, both via :meth:`ConnectorRegistry.register`.
+    Registration is intentionally decoupled from the httpx transport: the transport
+    is injected at ``ConnectorTransport.dispatch`` time, not bound to the registry,
+    so a connector's credential and its egress client stay separable.
+    """
+    for binding in bindings:
+        registry.register(binding)

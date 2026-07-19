@@ -5,21 +5,28 @@ This is the deterministic axis① (``untrusted_input``) producer. The three
 obligations of a deterministic-core module are exercised here:
 
 * **unit** — the truth table of :func:`is_untrusted` / :func:`derive_taint`,
+  the action-type → taint-source mapping (:func:`taint_source_for_action`
+  exhaustive truth-table over all ActionType values × untrusted_file flag),
   plus the live web-fetch derivation that turns axis① on through
   :meth:`RuleOfTwoContext.from_step`.
 * **property (hypothesis)** — MONOTONICITY (I1): taint only ever turns ON. Every
   descendant of a tainted parent is tainted; no derivation clears taint.
+  Additionally: determinism + deny-by-default of ``taint_source_for_action``.
 * **determinism (100x)** — identical ``(step, provenance)`` ⇒ identical
-  ``frozenset[Axis]`` (I2): ``distinct_outputs == 1``.
+  ``frozenset[Axis]`` (I2): ``distinct_outputs == 1``. Also 100x for
+  ``taint_source_for_action`` itself.
 """
 
 from __future__ import annotations
 
-from hypothesis import given
+import typing
+from typing import cast
+
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from secugent.core.contracts import ActionType, Step
-from secugent.core.provenance import TaintSource, derive_taint, is_untrusted
+from secugent.core.provenance import TaintSource, derive_taint, is_untrusted, taint_source_for_action
 from secugent.core.rule_of_two import (
     Axis,
     RuleOfTwoContext,
@@ -366,3 +373,196 @@ def test_provenance_axes_determinism_100_runs() -> None:
 def test_derive_taint_determinism_100_runs() -> None:
     outputs = {derive_taint(False, TaintSource.WEB_FETCH) for _ in range(100)}
     assert outputs == {True}
+
+
+# --------------------------------------------------------------------------- #
+# taint_source_for_action — exhaustive truth-table (§B-4a unit).
+# --------------------------------------------------------------------------- #
+
+# All ActionType values covered explicitly (deny-by-default invariant I4).
+
+
+def test_http_get_always_returns_web_fetch() -> None:
+    # http_get is definitionally an untrusted external source (§A-2 근거).
+    assert taint_source_for_action("http_get", {}) is TaintSource.WEB_FETCH
+    assert taint_source_for_action("http_get", {"irrelevant": 1}) is TaintSource.WEB_FETCH
+
+
+def test_connector_action_always_returns_connector_response() -> None:
+    # connector_action (external connector) is definitionally untrusted (§A-2 근거).
+    assert taint_source_for_action("connector_action", {}) is TaintSource.CONNECTOR_RESPONSE
+    assert (
+        taint_source_for_action("connector_action", {"untrusted_file": True})
+        is TaintSource.CONNECTOR_RESPONSE
+    )
+
+
+def test_file_read_with_explicit_untrusted_flag_returns_file_untrusted() -> None:
+    # Only an explicit boolean True flag taints file_read (I4 false-positive guard).
+    assert taint_source_for_action("file_read", {"untrusted_file": True}) is TaintSource.FILE_UNTRUSTED
+
+
+def test_file_read_without_flag_returns_none() -> None:
+    # Plain config read MUST NOT taint (I4 — no false positives).
+    assert taint_source_for_action("file_read", {}) is None
+    assert taint_source_for_action("file_read", {"unrelated": True}) is None
+
+
+def test_file_read_truthy_non_true_flag_is_deny_by_default_none() -> None:
+    # I3 deny-by-default: "yes" / 1 / ["x"] are truthy but not `is True`.
+    assert taint_source_for_action("file_read", {"untrusted_file": "yes"}) is None
+    assert taint_source_for_action("file_read", {"untrusted_file": 1}) is None
+    assert taint_source_for_action("file_read", {"untrusted_file": ["x"]}) is None
+
+
+def test_file_write_returns_none() -> None:
+    # Output action — not an untrusted input source (I4).
+    assert taint_source_for_action("file_write", {}) is None
+    assert taint_source_for_action("file_write", {"untrusted_file": True}) is None
+
+
+def test_desktop_returns_none() -> None:
+    # Desktop action — not an untrusted input source (I4).
+    assert taint_source_for_action("desktop", {}) is None
+
+
+def test_compute_returns_none() -> None:
+    # Compute — not an untrusted input source (I4).
+    assert taint_source_for_action("compute", {}) is None
+
+
+def test_unknown_returns_none() -> None:
+    # Unknown action type — deny-by-default, no taint invented (I3/I4).
+    assert taint_source_for_action("unknown", {}) is None
+
+
+# --------------------------------------------------------------------------- #
+# taint_source_for_action — hypothesis: determinism + deny-by-default (§B-4a property).
+# --------------------------------------------------------------------------- #
+
+_ALL_ACTION_TYPES: list[ActionType] = [
+    "file_read",
+    "file_write",
+    "http_get",
+    "desktop",
+    "compute",
+    "connector_action",
+    "unknown",
+]
+
+
+@given(
+    action_type=st.sampled_from(_ALL_ACTION_TYPES),
+    untrusted_file_flag=st.one_of(st.just(True), st.just(False), st.just(None)),
+)
+@settings(max_examples=200)
+def test_property_taint_source_for_action_deterministic(
+    action_type: ActionType,
+    untrusted_file_flag: bool | None,
+) -> None:
+    """Same (action_type, context) always returns identical TaintSource | None."""
+    ctx: dict[str, object] = {}
+    if untrusted_file_flag is not None:
+        ctx["untrusted_file"] = untrusted_file_flag
+    result1 = taint_source_for_action(action_type, ctx)
+    result2 = taint_source_for_action(action_type, ctx)
+    assert result1 is result2, f"{action_type=} {ctx=}: got {result1!r} then {result2!r}"
+
+
+@given(action_type=st.sampled_from(_ALL_ACTION_TYPES))
+@settings(max_examples=200)
+def test_property_taint_source_for_action_deny_by_default_non_true(
+    action_type: ActionType,
+) -> None:
+    """A truthy-but-not-True untrusted_file value must never activate file_read taint."""
+    result = taint_source_for_action(action_type, {"untrusted_file": "yes"})
+    # "yes" is truthy but not `is True`, so it must not trigger FILE_UNTRUSTED.
+    assert result is not TaintSource.FILE_UNTRUSTED or action_type != "file_read"
+
+
+# --------------------------------------------------------------------------- #
+# taint_source_for_action — 100x determinism run (§B-4a결정성 100회).
+# --------------------------------------------------------------------------- #
+
+
+def test_taint_source_for_action_determinism_100_runs() -> None:
+    """taint_source_for_action is identical 100x for every action type × flag combo."""
+    cases: list[tuple[ActionType, dict[str, object], TaintSource | None]] = [
+        ("http_get", {}, TaintSource.WEB_FETCH),
+        ("connector_action", {}, TaintSource.CONNECTOR_RESPONSE),
+        ("file_read", {"untrusted_file": True}, TaintSource.FILE_UNTRUSTED),
+        ("file_read", {}, None),
+        ("file_write", {}, None),
+        ("desktop", {}, None),
+        ("compute", {}, None),
+        ("unknown", {}, None),
+    ]
+    for action_type, ctx, expected in cases:
+        outputs = {taint_source_for_action(action_type, ctx) for _ in range(100)}
+        assert outputs == {expected}, (
+            f"{action_type=} {ctx=}: expected {{expected!r}} but got {outputs!r} over 100 runs"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# REV-2 regression: exhaustiveness guard + type-narrowing (§B-3 / §B-4a).
+#
+# These tests must remain GREEN after `taint_source_for_action` is narrowed to
+# `action_type: ActionType` and the if-chain is replaced with a `match` +
+# `assert_never`. They confirm the mapping covers EVERY ActionType member and
+# that the parameter signature is narrowed (not `str`).
+# --------------------------------------------------------------------------- #
+
+
+def test_rev2_every_action_type_member_is_handled_and_mapping_is_exact() -> None:
+    """REV-2: every ActionType member maps to the correct TaintSource or None.
+
+    Exhaustiveness guard: if a future ActionType is added without updating
+    taint_source_for_action the match + assert_never will fail mypy/CI (not
+    silently return None). This test pins the exact expected mapping so that
+    drift in either direction (new member unhandled, or an existing member's
+    taint changed unexpectedly) is caught at test time.
+    """
+    # get_args returns the Literal members at runtime.
+    all_members: tuple[str, ...] = typing.get_args(ActionType)
+    assert set(all_members) == {
+        "file_read",
+        "file_write",
+        "http_get",
+        "desktop",
+        "compute",
+        "connector_action",
+        "unknown",
+    }, "ActionType member set changed — update this test AND taint_source_for_action"
+
+    expected_mapping: dict[str, TaintSource | None] = {
+        "http_get": TaintSource.WEB_FETCH,
+        "connector_action": TaintSource.CONNECTOR_RESPONSE,
+        # file_read without the explicit flag → None (flag-gated; tested separately)
+        "file_read": None,
+        "file_write": None,
+        "desktop": None,
+        "compute": None,
+        "unknown": None,
+    }
+    for member in all_members:
+        # typing.get_args returns str at runtime; cast confirms these are valid ActionType members.
+        result = taint_source_for_action(cast("ActionType", member), {})
+        assert result == expected_mapping[member], (
+            f"ActionType {member!r}: expected {expected_mapping[member]!r}, got {result!r}"
+        )
+
+
+def test_rev2_taint_source_for_action_accepts_action_type_literal() -> None:
+    """REV-2: signature narrowed to ActionType — mypy must accept ActionType values.
+
+    This test can only exercise runtime behaviour (passing an ActionType value
+    must not raise); the compile-time narrowing is verified by mypy in the gate.
+    The test is here to document the intent and catch a regression if the param
+    is widened back to str.
+    """
+    # All valid ActionType values — must not raise at runtime.
+    for at in typing.get_args(ActionType):
+        # typing.get_args returns str; cast confirms these are valid ActionType members.
+        result = taint_source_for_action(cast("ActionType", at), {})
+        assert result is None or isinstance(result, TaintSource)

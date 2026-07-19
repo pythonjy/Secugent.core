@@ -39,13 +39,6 @@ from secugent.core.regulations import (
 # ---------------------------------------------------------------------------
 
 
-_REGULATIONS_EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "regulations_examples"
-_requires_examples = pytest.mark.skipif(
-    not _REGULATIONS_EXAMPLES_DIR.is_dir(),
-    reason="regulations_examples fixtures not shipped in public core",
-)
-
-
 def _engine_from_default() -> OversightEngine:
     path = Path(__file__).resolve().parents[2] / "regulations_examples" / "default.json"
     return OversightEngine(load_regulations(path))
@@ -396,7 +389,6 @@ def test_unknown_action_blocked() -> None:
     assert res.violation.category == "unknown_action"
 
 
-@_requires_examples
 def test_no_target_no_match() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(action_type="compute", target=None, command="echo hi"))
@@ -456,15 +448,88 @@ def test_session_patch_adds_banned_command() -> None:
 # ---------------------------------------------------------------------------
 
 
-@_requires_examples
 def test_default_blocks_confidential_dir() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(target="D:/team/confidential/plan.docx"))
     assert res.hard_block is True
 
 
-@_requires_examples
 def test_default_blocks_rm_rf() -> None:
     engine = _engine_from_default()
     res = engine.evaluate(_step(action_type="compute", command="rm -rf /"))
     assert res.hard_block is True
+
+
+# ---------------------------------------------------------------------------
+# DA-M14 (W5-f): pause/resume accessor methods — §B-4a 95% gate
+#
+# Lines 325-338, 342-343, 347-348, 368-369 were uncovered; adding direct
+# tests for the pause-state accessors to reach the >=95% coverage gate.
+# ---------------------------------------------------------------------------
+
+
+def _minimal_engine() -> OversightEngine:
+    """Return an OversightEngine with empty regulations (all allow)."""
+    return _make_engine()
+
+
+def test_set_paused_first_call_returns_true() -> None:
+    """set_paused() returns True when state actually changes (첫 정지)."""
+    engine = _minimal_engine()
+    changed = engine.set_paused(
+        paused=True,
+        request_id="req-001",
+        actor="감사관-홍길동",
+        stop_mode=False,
+    )
+    assert changed is True
+    assert engine.is_paused() is True
+
+
+def test_set_paused_idempotent_same_request_id_returns_false() -> None:
+    """set_paused() with the same request_id is idempotent → returns False (R2)."""
+    engine = _minimal_engine()
+    engine.set_paused(paused=True, request_id="req-dup", actor="op", stop_mode=False)
+    # Second call with same request_id — must be idempotent
+    changed = engine.set_paused(paused=True, request_id="req-dup", actor="op", stop_mode=False)
+    assert changed is False
+    assert engine.is_paused() is True
+
+
+def test_set_paused_unpause_clears_state() -> None:
+    """set_paused(paused=False) clears the pause state and returns True."""
+    engine = _minimal_engine()
+    engine.set_paused(paused=True, request_id="req-1", actor="op", stop_mode=True)
+    changed = engine.set_paused(paused=False, request_id="any", actor="op", stop_mode=False)
+    assert changed is True
+    assert engine.is_paused() is False
+    assert engine.is_stop_mode() is False
+
+
+def test_is_stop_mode_reflects_set_paused_stop_flag() -> None:
+    """is_stop_mode() returns the stop_mode flag set by set_paused()."""
+    engine = _minimal_engine()
+    assert engine.is_stop_mode() is False  # initial state
+    engine.set_paused(paused=True, request_id="req-stop", actor="op", stop_mode=True)
+    assert engine.is_stop_mode() is True
+
+
+def test_current_pause_request_id_set_and_cleared() -> None:
+    """current_pause_request_id() returns the active request_id or None."""
+    engine = _minimal_engine()
+    assert engine.current_pause_request_id() is None  # initially None
+    engine.set_paused(paused=True, request_id="req-xyz", actor="op", stop_mode=False)
+    assert engine.current_pause_request_id() == "req-xyz"
+    engine.set_paused(paused=False, request_id="any", actor="op", stop_mode=False)
+    assert engine.current_pause_request_id() is None
+
+
+def test_pause_snapshot_atomic_read() -> None:
+    """pause_snapshot() returns (is_paused, is_stop_mode) atomically."""
+    engine = _minimal_engine()
+    snap = engine.pause_snapshot()
+    assert snap == (False, False)
+
+    engine.set_paused(paused=True, request_id="req-snap", actor="op", stop_mode=True)
+    snap = engine.pause_snapshot()
+    assert snap == (True, True)

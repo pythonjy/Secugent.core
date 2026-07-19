@@ -67,6 +67,88 @@ def test_head_actor_cannot_use_sub_prefix() -> None:
         AgentNode(id="x", kind="head", actor="sub:nope", name="X")
 
 
+def test_duplicate_node_id_rejected() -> None:
+    """Lines 84, 86: duplicate id/actor paths in _validate_graph."""
+    # Include a valid SUB so the "at least one SUB" gate passes first
+    dup = AgentNode(id="sub-a", kind="sub", actor="sub:dup", name="DUP", parent_id="head")
+    with pytest.raises(ValidationError, match="duplicate agent node id"):
+        AgentConfig(tenant_id="acme", nodes=[_head(), _sub(), dup])
+
+
+def test_duplicate_actor_rejected() -> None:
+    """Line 86: duplicate actor path."""
+    dup = AgentNode(id="sub-dup", kind="sub", actor="sub:a", name="DUP2", parent_id="head")
+    with pytest.raises(ValidationError, match="duplicate agent actor"):
+        AgentConfig(tenant_id="acme", nodes=[_head(), _sub(), dup])
+
+
+def test_head_with_parent_id_rejected() -> None:
+    """Line 93: HEAD nodes must not have parent_id."""
+    with pytest.raises(ValidationError, match="HEAD nodes must not have parent_id"):
+        AgentConfig(
+            tenant_id="acme",
+            nodes=[
+                AgentNode(id="head", kind="head", actor="head", name="HEAD", parent_id="x"),
+                _sub(),
+            ],
+        )
+
+
+def test_sub_without_parent_id_rejected() -> None:
+    """Line 96: SUB node must have parent_id."""
+    with pytest.raises(ValidationError, match="must have parent_id"):
+        AgentConfig(
+            tenant_id="acme",
+            nodes=[
+                _head(),
+                AgentNode(id="sub-b", kind="sub", actor="sub:b", name="B"),
+            ],
+        )
+
+
+def test_sub_unknown_parent_rejected() -> None:
+    """Line 98: unknown parent_id for SUB node."""
+    with pytest.raises(ValidationError, match="unknown parent_id"):
+        AgentConfig(
+            tenant_id="acme",
+            nodes=[
+                _head(),
+                AgentNode(id="sub-b", kind="sub", actor="sub:b", name="B", parent_id="nonexistent"),
+            ],
+        )
+
+
+def test_cycle_detection_rejected() -> None:
+    """Lines 105, 112: cycle in parent chain must be rejected."""
+    # Build a minimal cycle-free config, then inject a self-referential parent
+    # to exercise lines 104-112 (cycle detection).
+    with pytest.raises((ValidationError, ValueError)):
+        # sub-a → head; sub-b → sub-a; sub-a.parent_id set to sub-b → cycle
+        AgentConfig(
+            tenant_id="acme",
+            nodes=[
+                AgentNode(id="head", kind="head", actor="head", name="HEAD"),
+                AgentNode(id="sub-a", kind="sub", actor="sub:a", name="A", parent_id="sub-b"),
+                AgentNode(id="sub-b", kind="sub", actor="sub:b", name="B", parent_id="sub-a"),
+            ],
+        )
+
+
+def test_enabled_sub_specs_returns_sub_only() -> None:
+    """Line 117: enabled_sub_specs() returns only SUB nodes."""
+    cfg = AgentConfig(tenant_id="acme", nodes=[_head(), _sub()])
+    specs = cfg.enabled_sub_specs()
+    assert all(s["id"] != "head" for s in specs)
+    assert any(s["id"] == "sub-a" for s in specs)
+
+
+def test_enabled_head_specs_returns_head_only() -> None:
+    """Line 133: enabled_head_specs() returns only HEAD nodes."""
+    cfg = AgentConfig(tenant_id="acme", nodes=[_head(), _sub()])
+    specs = cfg.enabled_head_specs()
+    assert all(s["id"] == "head" for s in specs)
+
+
 def test_validation_is_deterministic_100x() -> None:
     """Determinism (§B-4a) — identical input rejected the same way every time."""
     outcomes: set[bool] = set()

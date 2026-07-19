@@ -49,18 +49,20 @@ Design choices (deny-by-default, conservative):
    an inherited taint off), and a ``provenance`` block in BOTH the flat and nested
    locations is OR-combined (neither can clear the other's taint).
 
-   **Deferral (honest scope note):** the deterministic data-flow *producers* that
-   inject the provenance metadata (``HeadAgent.mark_untrusted_source`` /
-   ``mark_derived_from``) are not yet called from live planning or the dispatcher
-   — their only callers today are tests. So in live execution a provenance block
-   reaches this reader only if the LLM plan itself emits one; the auto-derivation
-   engine is real and tested, but its live producer feed is still pending wiring.
+   **Live producer status (G-C4, 2026-06-13):** ``HeadAgent._parse_plan`` now
+   calls ``taint_source_for_action`` after each ``Step`` is constructed and wires
+   the result into ``mark_untrusted_source``. ``http_get`` and
+   ``connector_action`` steps automatically activate axis① with no explicit flag.
+   ``file_read`` axis① fires only when an explicit ``untrusted_file: true`` flag
+   is present (flat or nested); the ingest-layer producer and cross-step
+   ``mark_derived_from`` propagation remain bounded follow-ups.
 * Explicit context flags and provenance-derived taint are purely **additive**
   overlays — they can only add an axis, never remove one (monotone, regression-safe).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -73,6 +75,7 @@ __all__ = [
     "classify_axes",
     "requires_hitl",
     "axes_to_audit",
+    "axes_for_steps",
 ]
 
 
@@ -263,3 +266,22 @@ def requires_hitl(axes: frozenset[Axis]) -> bool:
 def axes_to_audit(axes: frozenset[Axis]) -> list[str]:
     """Sorted, stable list of axis string values for the §C-2 audit payload."""
     return sorted(axis.value for axis in axes)
+
+
+def axes_for_steps(steps: Iterable[Step]) -> tuple[str, ...]:
+    """Sorted, de-duplicated §C-2 axis tokens for the union of axes over ``steps``.
+
+    DA-M4: the value :class:`~secugent.core.contracts.ApprovalScope` stamps into
+    its immutable ``rule_of_two_axes`` field at approval-creation time. It is the
+    union of :func:`classify_axes` over each step (each combined with its own
+    deterministic, provenance-derived :class:`RuleOfTwoContext` via
+    :meth:`RuleOfTwoContext.from_step`), mapped through :func:`axes_to_audit`.
+
+    Pure and deterministic: same ``steps`` (in any order) → identical tuple, with
+    no wall-clock / uuid / I/O. An empty or wholly axis-free step set yields the
+    empty tuple ``()`` — an honest "no axes", never a fabricated fill (INV-M4-4).
+    """
+    union: set[Axis] = set()
+    for step in steps:
+        union |= classify_axes(step, RuleOfTwoContext.from_step(step))
+    return tuple(axes_to_audit(frozenset(union)))

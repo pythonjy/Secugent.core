@@ -20,20 +20,22 @@ BDP_04 항목 13. Three infra-free, deterministic pieces back the deploy artifac
    branches/duplicates writes. This module re-implements **no** lease logic — it
    delegates.
 
-   SCOPE / HONESTY (it is NOT yet the live I3 guarantee): this arbiter is
-   *provisioned but not wired* — ``create_app`` and the event-store append path do
-   not yet route writes through :meth:`HaWriterArbiter.assert_writer`, so at
-   runtime it does not currently enforce single-writer. Two limitations bound the
-   guarantee even once wired: (a) the in-process backends provide single-writer
-   only within one process; (b) the production ``PgEventStore`` leader lock is a
-   *session-scoped* ``pg_advisory_lock`` taken on a pooled connection (see
-   ``event_store_pg.try_acquire_leader``), which is not a durable cross-process
-   fence on its own, and (c) two independent PG servers (primary + standby) each
-   have their own advisory-lock namespace, so an app-level lease cannot prevent a
-   PostgreSQL split-brain without DB-level fencing/sync-replication. The deploy
-   docs (CHANGELOG/compose/Helm/README) therefore describe single-writer
-   serialization against ONE PG instance + operator-driven promotion, NOT an
-   automatic lease-expiry failover or a runtime-enforced I3 invariant.
+   SCOPE / HONESTY (LOW-12 fix — docstring updated to match actual wiring):
+   The single-writer gate IS wired: ``create_app`` calls
+   ``event_store_pg.set_writer_guard`` (``main.py`` ~:2529) so the
+   ``HaWriterArbiter._assert_writer`` path runs on every PG-backed append.
+   However, two genuine residual limits remain:
+
+   (a) The guarantee is **single-process / session-scoped**: the leader lock is
+   a ``pg_advisory_lock`` taken on one pooled connection.  It is NOT a durable
+   cross-process fence — a second app process on a different host can take its
+   own advisory lock on the same PG primary without detecting the first holder.
+   (b) **Two independent PG servers** (primary + standby) each have separate
+   advisory-lock namespaces, so an app-level lease cannot prevent a PostgreSQL
+   split-brain without DB-level fencing (STONITH / sync-replication + connection
+   cutover).  The deploy docs therefore describe single-writer serialization
+   against ONE PG instance + operator-driven promotion, NOT an automatic
+   lease-expiry failover or a multi-process-safe fence.
 """
 
 from __future__ import annotations

@@ -26,6 +26,7 @@ __all__ = [
     "ConnectorError",
     "ConnectorPolicy",
     "ConnectorResult",
+    "ConnectorTransportUnavailable",
     "RateLimitExceeded",
     "TokenBucket",
     "WhitelistViolation",
@@ -45,6 +46,21 @@ class RateLimitExceeded(ConnectorError):
 
 class WhitelistViolation(ConnectorError):
     """Action target not in the tenant's allowlist."""
+
+
+class ConnectorTransportUnavailable(ConnectorError):
+    """No HTTP transport was injected into ``execute`` (fail-closed, S5).
+
+    Connectors used to fall back to ``{mock: True}`` success when
+    ``http_transport`` was ``None`` — a false-green that returned success
+    without ever performing egress. A missing transport is a **configuration**
+    error (the production wiring did not inject the real transport), distinct
+    from a :class:`WhitelistViolation` (a policy decision). Raising this — never
+    returning a mock success — makes a misconfigured deployment fail closed
+    instead of silently no-op'ing every write (§A-2.2 deny-by-default, §B-8
+    fail-fast). The qualified type lets the broker audit the deny reason without
+    confusing it with a policy violation.
+    """
 
 
 class ConnectorAction(BaseModel):
@@ -151,12 +167,26 @@ class _RateLimitedConnector:
     The bucket is consumed in ``execute`` only; ``validate_action`` MUST stay
     side-effect-free because the transport calls it twice (pre-credential gate +
     re-check inside ``execute``).
+
+    S5: an optional ``http_transport`` may be bound at construction. ``execute``
+    uses the per-call transport when one is passed, else this bound default, else
+    fails closed (:class:`ConnectorTransportUnavailable`). Binding lets the
+    SubAgent → broker → connector path (which calls ``router.dispatch(step)`` with
+    no per-call transport) still reach a real transport once the operator wires it.
     """
 
     name: str
 
-    def __init__(self) -> None:
+    def __init__(self, *, http_transport: Any | None = None) -> None:
         self._buckets: dict[str, TokenBucket] = {}
+        self._bound_transport = http_transport
+
+    def _resolve_transport(self, http_transport: Any | None) -> Any:
+        """Per-call transport > bound transport > fail closed (S5, INV-1/3)."""
+        transport = http_transport if http_transport is not None else self._bound_transport
+        if transport is None:
+            raise ConnectorTransportUnavailable(f"{self.name} connector has no transport configured")
+        return transport
 
     def _take_rate_token(self, principal: Principal, policy: ConnectorPolicy) -> None:
         tenant_id = str(principal.tenant_id)

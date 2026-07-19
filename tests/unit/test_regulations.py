@@ -18,12 +18,6 @@ from secugent.core.regulations import (
     load_regulations_from_dict,
 )
 
-_REGULATIONS_EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "regulations_examples"
-_requires_examples = pytest.mark.skipif(
-    not _REGULATIONS_EXAMPLES_DIR.is_dir(),
-    reason="regulations_examples fixtures not shipped in public core",
-)
-
 
 def _min_payload() -> dict:
     return {
@@ -74,7 +68,6 @@ def test_empty_domain_string_rejected() -> None:
         load_regulations_from_dict(payload)
 
 
-@_requires_examples
 def test_load_default_example() -> None:
     path = Path(__file__).resolve().parents[2] / "regulations_examples" / "default.json"
     regs = load_regulations(path)
@@ -82,7 +75,6 @@ def test_load_default_example() -> None:
     assert any(p.rule_id == "deny-confidential" for p in regs.banned_paths)
 
 
-@_requires_examples
 def test_load_strict_finance_example() -> None:
     path = Path(__file__).resolve().parents[2] / "regulations_examples" / "strict_finance.json"
     regs = load_regulations(path)

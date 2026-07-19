@@ -22,18 +22,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from secugent.config import OrchestratorConfig
+from secugent.core.rule_of_two import Axis, requires_hitl
 from secugent.observability.metrics import HITL_BACKLOG, RUN_LATENCY
 from secugent.orchestrator.errors import (
     DispatcherResultMalformed,
     PlannerFailedError,
 )
 from secugent.orchestrator.events import OrchestratorEventType as ET
+from secugent.orchestrator.evidence_binding import (
+    EvidenceBindingError,
+    evidence_from_connector_payload,
+)
 from secugent.orchestrator.lease import LeaseLostError, LeaseManager
 from secugent.orchestrator.state import (
     InMemoryRunStateStore,
@@ -42,6 +48,12 @@ from secugent.orchestrator.state import (
     RunState,
     RunStateStore,
 )
+from secugent.steer.interrupt_state import (
+    InterruptState,
+    InterruptStateError,
+    RunInterruptRecord,
+)
+from secugent.steer.snapshots import SnapshotRef
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only imports, no runtime dependency.
     # ``secugent.cost`` is the BSL-1.1 Enterprise quota-enforcement tier and is
@@ -57,12 +69,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only imports, no runtime dependen
 
 __all__ = [
     "ApprovalDecision",
+    "CheckpointMismatchError",
+    "CheckpointStoreProtocol",
     "OrchestratorStoppedError",
+    "OversightEngineProtocol",
     "PlanLike",
     "PlannerProtocol",
     "DispatcherProtocol",
     "EventPublisher",
+    "ResumeRequiresHITLError",
+    "RunNotDispatchingError",
     "RunOrchestrator",
+    "SteerHandlerProtocol",
     "SubFactory",
 ]
 
@@ -77,6 +95,24 @@ _logger = logging.getLogger("secugent.orchestrator")
 
 class OrchestratorStoppedError(RuntimeError):
     """Raised when :meth:`RunOrchestrator.enqueue` is called after stop()."""
+
+
+class RunNotDispatchingError(RuntimeError):
+    """D-L: resolve_run_engine(run_id) is None → 런이 현재 디스패치 중이 아님.
+
+    비디스패칭 런에 대한 pause 요청은 silent fallback 금지 — 반드시 raise.
+    """
+
+
+class ResumeRequiresHITLError(RuntimeError):
+    """INV-9 / D-F: 재개 시 Rule-of-Two 3축 → HITL 강제.
+
+    패치로 인해 axes가 3개가 되면 resume_from_checkpoint가 이 예외를 raise한다.
+    """
+
+
+class CheckpointMismatchError(KeyError):
+    """재개 요청의 SnapshotRef가 저장소에서 찾을 수 없음 (from_ref 불일치)."""
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +133,22 @@ class PlanLike:
     summary: str
     steps: list[Any]
     raw: Any = None  # the underlying Plan or compatible object
+    # DA-H2: AI-generated provenance threaded from the native Plan through the
+    # orchestrator abstraction so the runner can surface it on ``/runs/{id}``
+    # without importing the concrete ``Plan`` type. Defaults mark any plan
+    # honestly as AI-generated even when the upstream adapter (e.g. a resume
+    # re-dispatch, or a remote A2A planner) does not carry a native Plan.
+    ai_generated: bool = True
+    model_id: str = "unknown"
+    regulations_version: str = "0.0.0"
+    # DA-H4 (W5-c a′): the planner-declared potential risks and step→sub mapping,
+    # threaded as plain JSON-friendly structures (NOT concrete ``Risk``/``Plan``
+    # types, keeping the runner import-free of ``core.contracts``). Persisted onto
+    # the stored plan dict so ``GET /api/plans/{id}`` can render the HEAD risk
+    # section + step assignment for the Plan Review screen. Empty defaults keep
+    # legacy / stub planners that do not carry risks backward compatible.
+    risks: list[dict[str, Any]] = field(default_factory=list)
+    assigned_subs: dict[str, str] = field(default_factory=dict)
 
 
 class PlannerProtocol(Protocol):
@@ -104,7 +156,66 @@ class PlannerProtocol(Protocol):
 
 
 class DispatcherProtocol(Protocol):
-    async def dispatch(self, *, run_id: str, plan: PlanLike) -> dict[str, Any]: ...
+    async def dispatch(
+        self,
+        *,
+        run_id: str,
+        plan: PlanLike,
+        approved_step_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute ``plan``. ``approved_step_ids`` (DA-H4) narrows the minted
+        plan-approval scope to a step subset (``None`` = full plan)."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# SG-20260621-16: 협력자 Protocol (Any 대체 — mypy strict 체크 가능)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class OversightEngineProtocol(Protocol):
+    """runner가 호출하는 OversightEngine 메서드 계약.
+
+    set_paused 반환값(bool)이 명시돼 SG-20260621-17 멱등 반환값 검사에서도 사용.
+    current_pause_request_id는 BLOCKING-1 fix: dedup 판정용 순수 read 프로브.
+    """
+
+    def set_paused(
+        self,
+        *,
+        paused: bool,
+        request_id: str,
+        actor: str,
+        stop_mode: bool = ...,
+    ) -> bool: ...
+
+    def is_paused(self) -> bool: ...
+
+    def current_pause_request_id(self) -> str | None: ...
+
+
+@runtime_checkable
+class CheckpointStoreProtocol(Protocol):
+    """runner가 호출하는 체크포인트 저장소 메서드 계약."""
+
+    def write(self, checkpoint: Any) -> Any: ...
+
+    def resolve(self, ref: Any) -> Any: ...
+
+
+@runtime_checkable
+class SteerHandlerProtocol(Protocol):
+    """runner가 호출하는 SteerHandler 메서드 계약."""
+
+    def emit_resume_from_checkpoint(
+        self,
+        *,
+        run_id: str,
+        from_checkpoint_id: str,
+        actor: str,
+        rule_of_two_axes: list[str] | None = ...,
+    ) -> Any: ...
 
 
 EventPublisher = Callable[[str, str, dict[str, Any]], Awaitable[None]]
@@ -131,6 +242,12 @@ class ApprovalDecision:
     approver: str | None = None
     reason: str | None = None
     instruction: str | None = None  # amend only
+    # DA-H4 (W5-c): Plan Review partial approval. ``None`` ⇒ full plan approval
+    # (every step in scope — the legacy binary ``approve`` behaviour). A non-None
+    # list narrows the dispatcher's minted ``ApprovalScope`` to EXACTLY these step
+    # ids (deny-by-default: unselected steps are never authorized, INV-W5C-5). Only
+    # meaningful when ``action == "approve"``.
+    approved_step_ids: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +270,7 @@ class RunOrchestrator:
         worker_id: str = "node-local",
         lease_ttl_seconds: int = 60,
         cost_ledger: CostLedger | None = None,
+        external_engine_registry: Any = None,
     ) -> None:
         self._planner = planner
         self._dispatcher = dispatcher
@@ -172,6 +290,25 @@ class RunOrchestrator:
         self._approval_queues: dict[str, asyncio.Queue[ApprovalDecision]] = {}
         self._stopped = False
         self._lifecycle_lock = asyncio.Lock()
+        # G-C3: per-run OversightEngine 레지스트리 (INV-R6 — contextvar 금지)
+        # runner가 소유; API Layer(Lane B)에서 register_run_engine/deregister_run_engine 호출.
+        # _engine_registry_lock은 threading.Lock (동기 API에서 접근하므로 asyncio.Lock 불가).
+        # SG-20260621-16: OversightEngineProtocol로 타입 좁히기.
+        self._engine_registry: dict[str, OversightEngineProtocol] = {}
+        self._engine_registry_lock = threading.Lock()
+        # SG-20260621-01: external registry delegate (AppState._run_engines via
+        # run_engine_registry=self wiring in main.py). When set, all engine
+        # registry operations delegate here so request_pause sees the correct
+        # per-run engines registered by DispatcherAdapter.
+        self._external_engine_registry: Any = external_engine_registry
+        # G-C3: 이미 재디스패치된 체크포인트 참조 추적 (INV-3 멱등 resume)
+        self._resumed_checkpoints: set[str] = set()
+        self._resumed_checkpoints_lock = threading.Lock()
+        # SG-20260621-09: per-run interrupt state machine records (INV-SM-1).
+        # Serialises pause/resume verbs for the same run so illegal transitions
+        # (e.g. RESUMING→resume) raise InterruptStateError, not silent no-ops.
+        self._interrupt_records: dict[str, RunInterruptRecord] = {}
+        self._interrupt_records_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -233,6 +370,295 @@ class RunOrchestrator:
         is dispatched (i.e. in the lifespan, before recovery/enqueue) so the
         single-leader guarantee holds from the first dispatch."""
         self._lease_manager = lease_manager
+
+    # ------------------------------------------------------------------ #
+    # G-C3: per-run engine registry (INV-R6 — contextvar 절대 금지)
+    # ------------------------------------------------------------------ #
+
+    def register_run_engine(self, run_id: str, engine: OversightEngineProtocol) -> None:
+        """런 시작 시 per-run OversightEngine을 등록한다.
+
+        INV-R6: pause 신호는 이 레지스트리를 통해 명시 전달 — contextvar 금지.
+        Lane B의 wiring에서 dispatch 직전에 호출한다.
+        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
+        SG-20260621-16: engine은 OversightEngineProtocol로 좁혀 set_paused 호출 검증.
+        """
+        if self._external_engine_registry is not None:
+            self._external_engine_registry.register_run_engine(run_id, engine)
+            return
+        with self._engine_registry_lock:
+            self._engine_registry[run_id] = engine
+
+    def deregister_run_engine(self, run_id: str) -> None:
+        """런 종료 시 레지스트리에서 제거 (메모리 누수 방지).
+
+        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
+        AppState는 unregister_run_engine 이름을 사용한다.
+        """
+        if self._external_engine_registry is not None:
+            self._external_engine_registry.unregister_run_engine(run_id)
+            return
+        with self._engine_registry_lock:
+            self._engine_registry.pop(run_id, None)
+
+    def resolve_run_engine(self, run_id: str) -> OversightEngineProtocol | None:
+        """등록된 OversightEngine을 반환한다. 미등록이면 None.
+
+        D-L: None 반환 = 런이 현재 디스패치 중이 아님.
+        request_pause는 None 시 RunNotDispatchingError를 raise해야 한다.
+        SG-20260621-01: external_engine_registry가 설정되면 위임한다.
+        SG-20260621-16: OversightEngineProtocol 반환 타입으로 set_paused unchecked 차단.
+        """
+        if self._external_engine_registry is not None:
+            # _external_engine_registry는 AppState (Any) — 반환값은 구조적으로 OversightEngineProtocol을 만족함.
+            result: OversightEngineProtocol | None = self._external_engine_registry.resolve_run_engine(run_id)
+            return result
+        with self._engine_registry_lock:
+            return self._engine_registry.get(run_id)
+
+    def request_pause(
+        self,
+        run_id: str,
+        *,
+        request_id: str,
+        mode: Literal["pause", "stop"],
+        actor: str,
+    ) -> bool:
+        """런에 pause/stop 신호를 보낸다 (INV-R6: 명시 엔진 전달).
+
+        D-L: 엔진이 없으면 RunNotDispatchingError (silent fallback 금지).
+        R2: 동일 request_id → 멱등 (엔진의 set_paused가 처리).
+        §7.1: actor 파라미터 필수 (§9.1 인터럽트 이벤트 귀속).
+
+        SG-20260621-17: set_paused의 멱등 반환값을 호출자에게 전달한다.
+          True  = 신규 인터럽트 신호 설정 → 이벤트를 적재해야 함.
+          False = 동일 request_id 중복 요청 → 이벤트 재방출 금지(§10 D-3 위협).
+        SG-20260621-21: 상태 전이는 엔진 부수효과 *성공 이후*로 미룬다.
+        엔진이 None이면 레코드 전이 없이 즉시 RunNotDispatchingError를 raise한다.
+        이로써 엔진 None 시 INTERRUPT_REQUESTED에 고착되는 회귀를 방지한다.
+        """
+        # SG-20260621-09 + SG-20260621-21: state guard BEFORE side-effect.
+        # Read the current state under the lock to decide if we can proceed;
+        # we do NOT transition yet (SG-21 fix: transition only after set_paused succeeds).
+        # SG-20260621-17: INTERRUPT_REQUESTED 상태에서 동일 request_id 재진입은
+        # InterruptStateError가 아니라 멱등 no-op(False 반환)으로 처리한다.
+        # 이를 위해 엔진의 set_paused를 먼저 시도해 실제 멱등 여부를 확인한다.
+        with self._interrupt_records_lock:
+            rec = self._interrupt_records.get(run_id)
+            if rec is not None and (
+                not rec.is_quiescent()
+                or rec.interrupt_state
+                in (
+                    InterruptState.INTERRUPT_REQUESTED,
+                    InterruptState.PAUSING,
+                )
+            ):
+                # Already transitioning or already requested.
+                # SG-20260621-17: INTERRUPT_REQUESTED 상태에서는 엔진에 멱등 체크를 위임한다.
+                # 동일 request_id면 set_paused가 False를 반환 → 멱등 no-op.
+                # 다른 request_id면 엔진도 새 pause를 설정하려 시도하지만 상태기계가 막는다.
+                if rec.interrupt_state in (InterruptState.INTERRUPT_REQUESTED, InterruptState.PAUSING):
+                    # BLOCKING-1 fix: dedup 판정은 순수 read 프로브로만 수행한다.
+                    # set_paused(mutate)를 호출하면 다른 request_id의 stop_mode·actor가
+                    # 엔진 상태를 오염시킨 뒤 raise된다 (§9.1 귀속 오염 + D-J abort 위협).
+                    _engine_pre = self.resolve_run_engine(run_id)
+                    if _engine_pre is not None:
+                        _active_req_id = _engine_pre.current_pause_request_id()
+                        if _active_req_id == request_id:
+                            # 동일 request_id → 멱등 no-op, 이벤트 미방출
+                            return False
+                    # 다른 request_id (또는 엔진 없음) → 상태기계 위반으로 raise.
+                    # 엔진 상태는 변경되지 않았으므로 §9.1 귀속이 보존된다.
+                    raise InterruptStateError(rec.interrupt_state, InterruptState.INTERRUPT_REQUESTED)
+                # 그 외 전이 불가 상태 (PAUSED_SNAPSHOTTED, RESUMING 등)
+                raise InterruptStateError(rec.interrupt_state, InterruptState.INTERRUPT_REQUESTED)
+
+        # SG-20260621-21: resolve engine BEFORE state transition.
+        # If the engine is None, raise without creating/mutating the record.
+        engine = self.resolve_run_engine(run_id)
+        if engine is None:
+            raise RunNotDispatchingError(
+                f"런 {run_id!r}은 현재 디스패치 중이 아닙니다 (D-L). "
+                "이미 완료됐거나 아직 시작되지 않았을 수 있습니다."
+            )
+        stop_mode = mode == "stop"
+        # SG-20260621-17: capture the idempotent return value.
+        # True  = first set for this request_id → caller MUST emit the audit event.
+        # False = duplicate request_id → caller MUST skip re-emitting the event.
+        is_new_signal = engine.set_paused(
+            paused=True,
+            request_id=request_id,
+            actor=actor,
+            stop_mode=stop_mode,
+        )
+        # State transition AFTER the side-effect succeeded (SG-20260621-21).
+        # Now it is safe to record the transition — the engine is set.
+        with self._interrupt_records_lock:
+            rec = self._interrupt_records.setdefault(run_id, RunInterruptRecord(run_id=run_id))
+            # Re-check: another thread might have raced in between; if so, abort.
+            if rec.interrupt_state not in (InterruptState.RUNNING,):
+                # The state has already moved (concurrent call) — the engine
+                # set_paused is idempotent; just return without transitioning again.
+                return is_new_signal
+            rec.transition_to(InterruptState.INTERRUPT_REQUESTED)
+        return is_new_signal
+
+    def notify_pause_completed(self, run_id: str) -> None:
+        """체크포인트 write 성공 후 상태기계를 PAUSED_SNAPSHOTTED로 전이한다.
+
+        SG-20260621-20: 협조적 정지가 실제 일어나는 지점
+        (DispatcherAdapter._handle_pause_result의 체크포인트 write 성공 직후)에서
+        runner가 INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED 전이를 구동한다.
+        이 메서드를 호출하지 않으면 resume이 PAUSED_SNAPSHOTTED 상태가 아니어서
+        항상 InterruptStateError를 던지는 회귀가 발생한다.
+        """
+        with self._interrupt_records_lock:
+            rec = self._interrupt_records.get(run_id)
+            if rec is None:
+                # No interrupt record for this run — nothing to transition.
+                return
+            # Drive INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED.
+            # Each transition validates via _LEGAL_TRANSITIONS.
+            if rec.interrupt_state == InterruptState.INTERRUPT_REQUESTED:
+                rec.transition_to(InterruptState.PAUSING)
+            if rec.interrupt_state == InterruptState.PAUSING:
+                rec.transition_to(InterruptState.PAUSED_SNAPSHOTTED)
+
+    async def resume_from_checkpoint(
+        self,
+        run_id: str,
+        from_ref: SnapshotRef,
+        *,
+        checkpoint_store: CheckpointStoreProtocol,
+        steer_handler: SteerHandlerProtocol | None = None,
+        expected_tenant: str | None = None,
+    ) -> None:
+        """체크포인트에서 런을 재개한다 (D-B 신규 메서드).
+
+        기존 resume(record)와 다름: PLANNING에서 재시작이 아니라
+        스냅샷된 스텝 목록에서 재디스패치한다.
+
+        INV-3: 동일 from_ref URI로 두 번 호출 → 두 번째는 no-op (멱등).
+        D-F/INV-9: rule_of_two_axes가 3개 → ResumeRequiresHITLError.
+        CheckpointMismatchError: from_ref가 저장소에 없으면 raise.
+
+        G-C3 D-D §8.3: steer_handler (optional) — if provided, emits the second
+        steer.resumed producer (structural, with from_checkpoint_id) after the
+        engine pause is cleared. When None, the event is omitted (backward-compat
+        for callers that have not wired a SteerHandler).
+
+        SG-20260621-20: resume 성공 후 RESUMING→RUNNING 전이를 추가한다.
+        이로써 같은 런의 2차 pause/resume도 가능해진다.
+        """
+        # SG-20260621-09 + SG-20260621-20: verify state machine allows resume.
+        # PAUSED_SNAPSHOTTED (or REINSTRUCTING) → RESUMING is the only legal path.
+        # If no record exists (no prior pause), allow resume without transition
+        # (backward-compat: checkpoint may have been written by a prior process).
+        with self._interrupt_records_lock:
+            rec = self._interrupt_records.get(run_id)
+            if rec is not None and not rec.is_quiescent():
+                raise InterruptStateError(rec.interrupt_state, InterruptState.RESUMING)
+            # Only drive RESUMING if the record exists (prior pause happened)
+            if rec is not None:
+                rec.transition_to(InterruptState.RESUMING)
+
+        # CheckpointMismatchError: resolve 실패 시 KeyError를 잡아 변환
+        try:
+            checkpoint = checkpoint_store.resolve(from_ref)
+        except KeyError as exc:
+            raise CheckpointMismatchError(f"체크포인트를 찾을 수 없습니다: {from_ref.uri!r}") from exc
+
+        # SG-20260621-03: cross-tenant checkpoint validation
+        if expected_tenant is not None and checkpoint.tenant_id != expected_tenant:
+            raise CheckpointMismatchError(
+                f"체크포인트 tenant_id {checkpoint.tenant_id!r} != 예상 {expected_tenant!r}"
+            )
+
+        # SG-20260621-07: verify checkpoint belongs to this run
+        if checkpoint.run_id != run_id:
+            raise CheckpointMismatchError(f"checkpoint.run_id={checkpoint.run_id!r} != run_id={run_id!r}")
+
+        # D-F/INV-9: 3축 확인 → HITL 강제
+        try:
+            axes: frozenset[Axis] = frozenset(Axis(a) for a in checkpoint.rule_of_two_axes)
+        except ValueError:
+            axes = frozenset()
+        if requires_hitl(axes):
+            raise ResumeRequiresHITLError(
+                f"재개 시 Rule-of-Two 3축 감지 → HITL 승인 필요 (INV-9). axes={sorted(str(a) for a in axes)}"
+            )
+
+        # SG-20260621-22: HA lease 재획득 — _run_pipeline_leased와 동일 단일-리더 보장.
+        # If a lease manager is wired, the node resuming a checkpoint MUST hold the
+        # lease before dispatching; otherwise two nodes can execute the same run
+        # concurrently (fail-open double-execute). LeaseLostError → fail-closed
+        # (do not dispatch; emit run.handover audit and return).
+        if self._lease_manager is not None:
+            try:
+                await self._lease_manager.acquire_run(run_id, self._worker_id, self._lease_ttl_seconds)
+            except LeaseLostError:
+                _logger.warning(
+                    "resume: run %s lease held elsewhere; %s declines to dispatch",
+                    run_id,
+                    self._worker_id,
+                )
+                await self._record_and_publish(
+                    run_id,
+                    "run.handover",
+                    {
+                        "run_id": run_id,
+                        "action": "resume_lease_held_elsewhere",
+                        "reason": f"lease not acquired by {self._worker_id} on resume",
+                    },
+                )
+                return
+
+        # INV-3: 멱등 — 동일 URI 두 번 호출 시 두 번째는 no-op
+        # SG-20260621-10: check-only here; mark AFTER successful dispatch
+        with self._resumed_checkpoints_lock:
+            if from_ref.uri in self._resumed_checkpoints:
+                return
+
+        # 엔진 pause 해제 (재개이므로)
+        engine = self.resolve_run_engine(run_id)
+        if engine is not None:
+            engine.set_paused(
+                paused=False,
+                request_id=checkpoint.checkpoint_id,
+                actor=checkpoint.actor,
+            )
+
+        # G-C3 D-D §8.3: emit the second steer.resumed producer (structural,
+        # with from_checkpoint_id). Distinguished from apply()'s cosmetic
+        # steer.resumed by the presence of ``from_checkpoint_id`` in the payload.
+        if steer_handler is not None:
+            steer_handler.emit_resume_from_checkpoint(
+                run_id=run_id,
+                from_checkpoint_id=from_ref.uri,
+                actor=checkpoint.actor,
+                rule_of_two_axes=checkpoint.rule_of_two_axes,
+            )
+
+        # 체크포인트의 pending 스텝으로 재디스패치
+        pending_plan = PlanLike(
+            id=f"resume-{checkpoint.checkpoint_id}",
+            summary=f"재개: step_index={checkpoint.step_index}",
+            steps=list(checkpoint.pending_step_ids),
+        )
+        try:
+            await self._dispatcher.dispatch(run_id=run_id, plan=pending_plan)
+        except Exception:
+            # SG-20260621-10: dispatch 실패 시 URI를 marked하지 않아 재시도 가능
+            raise
+        # dispatch 성공 후에만 멱등 URI 마킹 (SG-20260621-10)
+        with self._resumed_checkpoints_lock:
+            self._resumed_checkpoints.add(from_ref.uri)
+        # SG-20260621-20: RESUMING→RUNNING 전이 (dispatch 성공 후).
+        # 이로써 같은 런의 2차 pause/resume이 가능해진다.
+        with self._interrupt_records_lock:
+            rec2 = self._interrupt_records.get(run_id)
+            if rec2 is not None and rec2.interrupt_state == InterruptState.RESUMING:
+                rec2.transition_to(InterruptState.RUNNING)
 
     # ------------------------------------------------------------------ #
     # Enqueue + approval signals
@@ -313,6 +739,20 @@ class RunOrchestrator:
     async def approve(self, run_id: str, *, approver: str = "human") -> None:
         await self._signal(run_id, ApprovalDecision(action="approve", approver=approver))
 
+    async def partial_approve(self, run_id: str, *, approver: str, step_ids: list[str]) -> None:
+        """DA-H4: approve ONLY ``step_ids`` of the awaiting plan (Plan Review).
+
+        Signals the same approval queue as :meth:`approve` but carries the selected
+        step subset so the dispatcher mints a narrowed :class:`ApprovalScope`.
+        Unselected steps are never authorized (deny-by-default / fail-closed,
+        INV-W5C-5). The caller (the FastAPI plan-decision route) has already
+        validated the subset and stamped the §C-2 plan_review audit event.
+        """
+        await self._signal(
+            run_id,
+            ApprovalDecision(action="approve", approver=approver, approved_step_ids=list(step_ids)),
+        )
+
     async def reject(self, run_id: str, *, reason: str | None = None) -> None:
         await self._signal(run_id, ApprovalDecision(action="reject", reason=reason))
 
@@ -331,6 +771,24 @@ class RunOrchestrator:
 
     async def get_record(self, run_id: str) -> RunRecord | None:
         return await self._store.get(run_id)
+
+    async def find_record_by_plan_id(self, plan_id: str) -> RunRecord | None:
+        """DA-H4: resolve the run record whose stored plan has ``id == plan_id``.
+
+        Plans are keyed by ``run_id`` in the state store, so the read-only
+        ``GET /api/plans/{plan_id}`` endpoint resolves the owning record by
+        scanning the *open* runs (a plan under review — and through execution — is
+        always non-terminal: AWAITING_APPROVAL / APPROVED / EXECUTING / PAUSED /
+        REPORTING). A fully finished run (COMPLETED / FAILED / CANCELLED) is out of
+        the Plan Review window and resolves to ``None`` (the caller returns 404).
+        The tenant check is the caller's responsibility (deny-by-default 404 on a
+        cross-tenant id — no existence oracle).
+        """
+        for record in await self._store.list_open_runs():
+            plan = record.plan
+            if isinstance(plan, dict) and plan.get("id") == plan_id:
+                return record
+        return None
 
     async def list_events(self, run_id: str) -> list[RunEvent]:
         return await self._store.list_events(run_id)
@@ -539,10 +997,50 @@ class RunOrchestrator:
                 ET.PLAN_CREATED,
                 {"plan_id": plan.id, "summary": plan.summary, "steps": len(plan.steps)},
             )
+            # Grounding producer (2026-07-13): bind any runtime connector/tool
+            # evidence (context['grounding_evidence']) onto the plan fail-closed. A
+            # malformed grounding payload FAILS the run here — deny-by-default: a
+            # corrupt grounding provenance must never reach the human approval gate
+            # (INV-RW-2). Absent grounding ⇒ [] (backward compatible, INV-RW-1).
+            try:
+                plan_evidence = _bind_plan_evidence(plan_context)
+            except EvidenceBindingError as exc:
+                _observe_latency(RunState.FAILED.value)
+                await self._fail(run_id, reason=f"grounding_evidence_invalid: {exc}")
+                await self._record_and_publish(
+                    run_id,
+                    ET.RUN_FAILED_ADAPTER,
+                    {"reason_class": "EvidenceBindingError", "detail": str(exc)},
+                )
+                return
             await self._store.update_state(
                 run_id,
                 RunState.PLANNING,
-                plan={"id": plan.id, "summary": plan.summary, "steps": len(plan.steps)},
+                # DA-H2: surface immutable AI-generated provenance on the stored
+                # plan so ``GET /runs/{id}`` (and the W5-c Plan Review UI) can
+                # render the AI-identification notice. Read from the threaded
+                # PlanLike fields (no concrete ``Plan`` import in the runner).
+                # DA-H4 (W5-c a′): ALSO durably surface the goal, full ``step_list``,
+                # planner-declared ``risks`` and ``assigned_subs`` so the read-only
+                # ``GET /api/plans/{id}`` Plan Review endpoint has an internal source
+                # for the HEAD risk section + per-step checkboxes. The legacy
+                # ``steps`` (int count) and provenance keys are preserved verbatim
+                # (append-only key additions — backward compatible, INV: no key
+                # removed/retyped).
+                plan={
+                    "id": plan.id,
+                    "summary": plan.summary,
+                    "goal": plan.summary,
+                    "steps": len(plan.steps),
+                    "step_list": _serialize_plan_steps(plan.steps),
+                    "risks": [dict(r) for r in plan.risks],
+                    "assigned_subs": dict(plan.assigned_subs),
+                    "ai_generated": plan.ai_generated,
+                    "model_id": plan.model_id,
+                    "regulations_version": plan.regulations_version,
+                    # Grounding citations bound above (INV-RW-1: [] when ungrounded).
+                    "evidence": plan_evidence,
+                },
             )
 
             # 2. COST QUOTA GATE (BDP_03 item 12) — fail-closed BEFORE the human
@@ -618,7 +1116,17 @@ class RunOrchestrator:
             await self._store.update_state(run_id, RunState.EXECUTING)
 
             try:
-                results = await self._dispatcher.dispatch(run_id=run_id, plan=plan)
+                # DA-H4: a partial Plan Review approval carries the selected step
+                # subset; thread it so the dispatcher mints an ApprovalScope narrowed
+                # to EXACTLY those steps. ``None`` ⇒ full plan (legacy approve). Only
+                # pass the kwarg when narrowing so legacy dispatcher fakes that do not
+                # accept ``approved_step_ids`` keep working on the full-approval path.
+                if decision.approved_step_ids is not None:
+                    results = await self._dispatcher.dispatch(
+                        run_id=run_id, plan=plan, approved_step_ids=decision.approved_step_ids
+                    )
+                else:
+                    results = await self._dispatcher.dispatch(run_id=run_id, plan=plan)
             except DispatcherResultMalformed as exc:
                 _observe_latency(RunState.FAILED.value)
                 await self._fail(run_id, reason=f"dispatch_result_malformed: {exc}")
@@ -700,17 +1208,29 @@ class RunOrchestrator:
         Concurrency note (edge case 12.7) — HONEST RESIDUAL, not a mitigated gap:
         this pre-flight gate (and the per-step ``SubAgent`` gate) is a pure READ,
         so two same-tenant runs admitted in the same instant both observe the same
-        pre-spend total and may together overshoot the cap. The present bound is
-        ONLY already-recorded (external / prior-run / cross-run) spend: in-run
-        self-inflicted spend is NOT recorded live, because the sole per-call
-        recorder (``ModelCascadeRouter.record_call`` → ``CostLedger.record``) is
-        not yet invoked from the live dispatch path, so a run's own model calls do
-        not grow the ledger total mid-run and the per-step gate cannot fire on
-        self-inflicted overspend. A strict atomic admission reservation is
-        intentionally NOT shipped: per-run spend is unknown at admission (it is
-        metered per model-call), so any reserved amount would be arbitrary. This
-        is a documented residual; do not read it as defence-in-depth the code does
-        not provide (§B-8 fail-fast, §12.6 I1).
+        pre-spend total and may together overshoot the cap. A strict atomic
+        admission reservation is intentionally NOT shipped: per-run spend is
+        unknown at admission (it is metered per model-call), so any reserved
+        amount would be arbitrary. This is a documented residual; do not read it
+        as defence-in-depth the code does not provide (§B-8 fail-fast, §12.6 I1).
+
+        COST-01 (resolved): in-run self-inflicted spend IS now recorded live. The
+        usage observer on the live LLM client (installed by ``create_app`` via
+        ``secugent.cost.recorder.build_cost_recording_observer``) writes each
+        successful ``generate()`` to ``CostLedger`` under the run bound by
+        ``bind_cost_context`` in ``HeadAgent.plan`` / ``SubAgent._run_step``. So a
+        run's own model calls now grow the ledger total mid-run and the per-step
+        gate CAN fire on self-inflicted overspend. Metering is fail-open
+        (best-effort → WARN), so under a metering error the bound stays the
+        already-recorded external/prior spend and the gate still fails closed; and
+        honesty: Anthropic usage is exact; a sovereign adapter is exact when its
+        body exposes provider usage and falls back to a length ESTIMATE
+        (``UsageEvent.exact=False``) when it does not; the mock always estimates.
+        Dollars for an out-of-catalog model record as ``$0`` (tokens preserved),
+        so live accrual can conservatively under-account but never over-claims
+        precision. The sovereign chokepoint (``llm_clients/_base.py``) emits on
+        the closed-network-first path too, so INV-2 holds for on-prem/air-gapped
+        deployments and not only the Anthropic/mock paths.
         """
         if self._cost_ledger is None:
             return None
@@ -770,6 +1290,72 @@ class RunOrchestrator:
 
 async def _noop_publish(run_id: str, topic: str, payload: dict[str, Any]) -> None:
     return None
+
+
+# DA-H4 (W5-c a′): the Step fields the Plan Review surface needs. ``context`` is
+# included because ``GET /runs/{id}/plan-decision`` recomputes the Rule of Two
+# axes (``rule_of_two.axes_for_steps``) from the persisted steps, and axis ①
+# (untrusted_input) is carried in ``Step.context`` provenance — dropping it would
+# make the audited ``rule_of_two_axes`` under-report the real axes (a §C-2 honesty
+# violation). The §C-2 plan_review audit must match the scope the dispatcher mints.
+_PLAN_STEP_FIELDS = (
+    "id",
+    "tenant_id",
+    "run_id",
+    "plan_id",
+    "actor",
+    "action_type",
+    "target",
+    "command",
+    "status",
+    "context",
+)
+
+
+def _serialize_plan_steps(steps: list[Any]) -> list[dict[str, Any]]:
+    """Project each plan step to a JSON-serialisable dict (DA-H4 a′).
+
+    Duck-typed so the runner stays free of a concrete ``Step`` import: a pydantic
+    ``Step`` is dumped via ``model_dump(mode="json")``; a plain dict is read
+    directly; anything else contributes an empty dict (never raises — a stored
+    plan must always serialise, the SQLite store ``_dumps`` would otherwise fail
+    fast on the whole record). Only the Plan-Review-relevant fields are kept so
+    the persisted plan does not balloon with unrelated step internals.
+    """
+    out: list[dict[str, Any]] = []
+    for step in steps:
+        if hasattr(step, "model_dump"):
+            raw = step.model_dump(mode="json")
+        elif isinstance(step, dict):
+            raw = step
+        else:
+            raw = {}
+        out.append({key: raw.get(key) for key in _PLAN_STEP_FIELDS})
+    return out
+
+
+def _bind_plan_evidence(context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Bind runtime connector/tool grounding into persisted ``plan['evidence']``.
+
+    The producer half of the grounding-citation path (2026-07-13). SecuGent builds
+    no retrieval engine (§A-1): a retrieval connector / MCP tool (or the caller
+    that ran one) places its result's ``evidence`` list on the run context under
+    ``grounding_evidence``; this re-validates it fail-closed (§B-8) against the N2
+    :class:`~secugent.core.grounding.Evidence` schema and returns citation dicts
+    for durable persistence.
+
+    * ``grounding_evidence`` absent/``None`` → ``[]`` (an ungrounded plan is
+      normal, not an error — INV-RW-1 backward compatibility).
+    * present → each element must pass ``Evidence`` validation; a non-list or any
+      malformed element raises :class:`EvidenceBindingError` (all-or-nothing,
+      INV-RW-2 / INV-N3-4). The caller fails the run closed — a corrupt grounding
+      provenance must never reach the human approval gate. Order is preserved.
+    """
+    raw = context.get("grounding_evidence")
+    if raw is None:
+        return []
+    bound = evidence_from_connector_payload({"evidence": raw})
+    return [ev.model_dump(mode="json") for ev in bound]
 
 
 _TERMINAL = {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}

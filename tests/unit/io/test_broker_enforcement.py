@@ -262,9 +262,13 @@ def test_dispatch_shim_suspend_raises(tmp_path: Path) -> None:
 
 
 def test_set_then_get_broker() -> None:
+    saved = broker_module._BROKER
     broker = _broker(_ALLOW_ALL, _RecordingAudit(), _RecordingTransport())
-    broker_module.set_broker(broker)
-    assert broker_module.get_broker() is broker
+    try:
+        broker_module.set_broker(broker)
+        assert broker_module.get_broker() is broker
+    finally:
+        broker_module._BROKER = saved
 
 
 def test_get_broker_unset_raises() -> None:
@@ -275,6 +279,22 @@ def test_get_broker_unset_raises() -> None:
             broker_module.get_broker()
     finally:
         broker_module._BROKER = saved
+
+
+def test_reset_broker_clears_singleton() -> None:
+    saved = broker_module._BROKER
+    try:
+        broker_module.set_broker(_broker(_ALLOW_ALL, _RecordingAudit(), _RecordingTransport()))
+        broker_module.reset_broker()
+        assert broker_module._BROKER is None
+        with pytest.raises(RuntimeError):
+            broker_module.get_broker()
+    finally:
+        broker_module._BROKER = saved
+
+
+def test_reset_broker_is_exported() -> None:
+    assert "reset_broker" in broker_module.__all__
 
 
 # --------------------------------------------------------------------------- #

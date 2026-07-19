@@ -97,7 +97,7 @@ class SapConnector(_RateLimitedConnector):
         self._take_rate_token(principal, policy)
         if not secret_value:
             raise WhitelistViolation("sap connector requires service token via SecretsManager")
-        if http_transport is None:
-            return ConnectorResult(ok=True, payload={"mock": True, "action": action.name})
-        response = await http_transport(action=action, principal=principal, secret_value=secret_value)
+        # S5: per-call transport > bound transport > fail closed (no mock success).
+        transport = self._resolve_transport(http_transport)
+        response = await transport(action=action, principal=principal, secret_value=secret_value)
         return ConnectorResult(ok=bool(response.get("ok", True)), payload=response)

@@ -28,6 +28,7 @@ from secugent.core.tenancy import TenantId
 
 __all__ = [
     "AsyncEventStore",
+    "LeaderLease",
     "LeaseLostError",
     "LeaderLostError",
     "RunLease",
@@ -45,6 +46,32 @@ class RunLease:
     worker_id: str
     acquired_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class LeaderLease:
+    """A DURABLE per-worker leader lease (DA-C1 B2 — the live single-writer fence).
+
+    Unlike the session-scoped ``pg_advisory_lock`` (which rides a pooled
+    connection that is RETURNED to the pool, so it is NOT durably held for the
+    caller — see ``PgEventStore.try_acquire_leader``), this lease is a persistent
+    ``leader_leases`` row with a TTL: a crashed leader's lease EXPIRES and another
+    worker can take over, while the stale leader fails its next ``_assert_writer``
+    with :class:`LeaderLostError` (deny-by-default — never two simultaneous
+    durable writers, INV-C1-4). ``fence_token`` increases monotonically on every
+    (re)acquisition so a write authorised under an older leadership epoch is
+    rejected on renew.
+    """
+
+    worker_id: str
+    lock_key: int
+    acquired_at: datetime
+    expires_at: datetime
+    fence_token: int
+
+    def is_expired(self, now: datetime) -> bool:
+        """True iff the lease's TTL has elapsed at ``now`` (``expires_at <= now``)."""
+        return self.expires_at <= now
 
 
 class LeaseLostError(RuntimeError):

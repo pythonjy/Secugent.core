@@ -26,6 +26,11 @@ data/
 # the *.example templates tracked.
 **/.env
 !**/.env.example
+# DA-M11: the Prometheus scrape bearer (deploy/prometheus/metrics_token) holds
+# the SAME secret as SECUGENT_METRICS_TOKEN; keep it out of history. The tracked
+# template (metrics_token.example) shows operators how to create it.
+deploy/prometheus/metrics_token
+!deploy/prometheus/metrics_token.example
 
 # Agent worktrees (physical cleanup handled by merger post-merge)
 .claude/worktrees/
@@ -44,3 +49,49 @@ ui/tsconfig.tsbuildinfo
 
 # Personal (non-shared) Claude Code settings — shared config is settings.json
 .claude/settings.local.json
+
+# Internal scratch dirs (not source; manifest-excluded from public release)
+BDP_REFORMED/
+
+# Internal strategy artifacts — never committed, blacklisted from public release
+# (mirrors release/public_manifest.yaml exclude globs *시장진단*/*로우리스크*/*전략*)
+*시장진단*
+*로우리스크*
+*전략*
+
+# Stray root lockfile — the JS project lives in ui/ (ui/package-lock.json is tracked)
+/package-lock.json
+
+# Python build outputs (python -m build / setuptools); regenerated, never committed.
+# Keeps the runbook §2.2 clean-tree precondition intact after a Phase C build.
+/dist/
+*.egg-info/
+
+# Tauri desktop backend sidecar — PyInstaller build artifacts (rebuilt at package time)
+deploy/desktop/sidecar/dist/
+deploy/desktop/sidecar/build/
+
+# Serena MCP local project cache/config/memories — local tooling state, never committed
+.serena/
+
+# ── R1 위생 정비 (2026-07-02) ──────────────────────────────────────────
+# LibreOffice/OpenOffice 스프레드시트 잠금 파일 (문서가 열려 있을 때 생성).
+.~lock.*#
+
+# 감사 세션 임시 probe/scratch 텍스트 파일.
+_probe*.txt
+
+# 내부 PoC 영업 인텔 — 실명 금융권 타겟 숏리스트 + 컨택.
+# NEVER commit: 이 저장소는 공개 OSS(../secugent-core)로 추출된다. deny-by-default.
+# 로컬 유지 + 저장소 밖 백업(R1 백업 zip)으로만 관리한다.
+memory/
+
+# 내부 PoC 계획 산출물 — 원가분석 + 실명 고객 계획.
+# 위 memory/와 동일한 공개-유출 방지 근거. (시장진단/로우리스크/전략 HTML은
+# 위쪽 기존 globs가 이미 커버.)
+plans/Secugent_PoC_Plan_*.md
+plans/*비용분석*.xlsx
+
+# PoC 데모 런북(docs/demo/)의 임시 산출물 — 감사 저장소·시드 스크립트·출력 캡처.
+# 데모마다 재생성되는 스크래치이므로 커밋하지 않는다(공개 추출 오염 방지).
+demo-scratch/

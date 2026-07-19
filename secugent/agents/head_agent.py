@@ -14,6 +14,7 @@ Per Flowchart §4 and master prompt PHASE 4:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -30,12 +31,14 @@ from secugent.core.contracts import (
     Risk,
     Step,
 )
+from secugent.core.cost_context import bind_cost_context
 from secugent.core.event_store import EventStore
 from secugent.core.llm_client import PLANNER_MODEL_DEFAULT, LLMClient, LLMError
 from secugent.core.prompts import load_prompt
-from secugent.core.provenance import TaintSource
+from secugent.core.provenance import TaintSource, taint_source_for_action
 from secugent.core.rule_of_two import (
     RuleOfTwoContext,
+    axes_for_steps,
     classify_axes,
     requires_hitl,
 )
@@ -82,6 +85,7 @@ class HeadAgent:
         model: str | None = None,
         max_attempts: int = 3,
         approval_ttl_seconds: int = DEFAULT_TTL_SECONDS,
+        regulations_version_provider: Callable[[], str] | None = None,
     ) -> None:
         self._llm = llm
         self._events = event_store
@@ -90,6 +94,12 @@ class HeadAgent:
         self._max_attempts = max_attempts
         self._approval_ttl = approval_ttl_seconds
         self._system_prompt = load_prompt("head_planner")
+        # DA-H2: resolver for the active REGULATIONS version stamped onto every
+        # Plan's provenance. Injected by the API boot wiring as
+        # ``lambda: state_.active_regulations_version`` so the live OversightEngine
+        # version is read at plan() time. ``None`` ⇒ the safe ``"0.0.0"`` fallback
+        # (dev/test), matching ``state_.active_regulations_version``'s own fallback.
+        self._regulations_version_provider = regulations_version_provider
         self.actor = "head"
 
     # ------------------------------------------------------------------ #
@@ -107,13 +117,20 @@ class HeadAgent:
                 payload={"attempt": attempt, "goal": request.goal},
             )
             try:
-                raw = self._llm.generate(
-                    model=self._model,
-                    system=self._system_prompt,
-                    messages=self._messages_for(request, retry_hint=last_error),
-                    max_tokens=2048,
-                    response_format="json",
-                )
+                # COST-01: attribute this planning LLM call to the requesting run
+                # so a usage observer (the live recorder) records the spend under
+                # the correct tenant/run. Bound in the SAME call stack that calls
+                # generate() (this runs on the planner thread via to_thread), so
+                # the synchronous observer reads this attribution. No recorder
+                # installed ⇒ the bind is a harmless no-op (INV-3).
+                with bind_cost_context(str(request.tenant_id), request.run_id):
+                    raw = self._llm.generate(
+                        model=self._model,
+                        system=self._system_prompt,
+                        messages=self._messages_for(request, retry_hint=last_error),
+                        max_tokens=2048,
+                        response_format="json",
+                    )
             except LLMError as exc:
                 last_error = f"LLM error: {exc}"
                 self._emit(
@@ -213,10 +230,9 @@ class HeadAgent:
         # Axis ① (untrusted_input) is auto-derived from a ``provenance`` block (see
         # ``mark_untrusted_source``) by ``RuleOfTwoContext.from_step``, so this guard
         # catches provenance-tainted 3-axis steps too — not only explicitly-declared
-        # ones. NOTE (BDP_02 항목 5 deferral): ``mark_untrusted_source`` /
-        # ``mark_derived_from`` are not yet called from ``plan``/``_parse_plan`` or
-        # the dispatcher, so a provenance block reaches this guard only via the LLM
-        # plan today; the auto-derivation is real, its live producer feed is pending.
+        # ones. G-C4 (2026-06-13): ``taint_source_for_action`` is now called from
+        # ``_parse_plan`` so every http_get/connector_action step produced by the
+        # planner automatically carries a provenance block — the deferral is resolved.
         rule_of_two_step_ids = sorted(
             s.id for s in approved_steps if requires_hitl(classify_axes(s, RuleOfTwoContext.from_step(s)))
         )
@@ -238,6 +254,12 @@ class HeadAgent:
             # EM-08: bind the approval to the minimal envelope the run will run
             # inside; the SubAgent re-verifies this hash on consume.
             envelope_hash=envelope_hash,
+            # DA-M4 (§C-2 rule_of_two_axes): stamp the Rule of Two axes the
+            # approved steps collectively trip, computed deterministically over the
+            # union of their provenance-aware classifications. Frozen at issuance —
+            # the HITL approve/reject emitters read this back verbatim so the audit
+            # row records the real axes that justified the human decision.
+            rule_of_two_axes=axes_for_steps(approved_steps),
         )
         approval = self._approvals.request_approval(actor=actor, scope=scope, ttl_seconds=self._approval_ttl)
         self._emit(
@@ -292,17 +314,24 @@ class HeadAgent:
         this top-level mark, because the core now OR-combines both locations
         (deterministic — the producer cannot lower a taint the control plane sees).
 
-        .. note:: Deferred live wiring (BDP_02 항목 5).
+        .. note:: Live wiring (G-C4, 2026-06-13).
 
-           This helper is the deterministic axis-① data-flow producer, but it is
-           **not yet invoked from live planning** (``plan`` / ``_parse_plan``) or the
-           dispatcher — its only callers today are tests. In live execution a
-           ``provenance`` block reaches the core classifier only if the LLM plan
-           itself emits one. Wiring this producer into the planner/dispatcher (so an
-           untrusted tool result automatically taints the steps derived from it,
-           without a hand-written provenance dict) is the remaining end-to-end step;
-           until then the auto-derivation engine is real and tested but its live feed
-           is pending.
+           ``_parse_plan`` now calls :func:`~secugent.core.provenance.taint_source_for_action`
+           immediately after constructing each :class:`~secugent.core.contracts.Step` and
+           invokes this helper when a non-``None`` source is returned. As a result,
+           ``http_get`` and ``connector_action`` steps produced by the planner
+           automatically carry a provenance block — no hand-written declaration or
+           test-only call needed.
+
+           **Bounded follow-ups (not yet shipped):**
+
+           (a) A file/ingest-layer producer that sets the ``untrusted_file`` flag
+               for genuinely-untrusted-source reads (uploads dir, email
+               attachments, external mounts) — until that producer ships, only
+               plans that explicitly carry ``untrusted_file: true`` (flat or
+               nested) activate ``FILE_UNTRUSTED`` taint on ``file_read`` steps.
+           (b) Cross-step taint propagation (``mark_derived_from``) — requires a
+               ``depends_on`` field on the ``Step`` model not yet present.
         """
         prior_tainted = RuleOfTwoContext.from_step(step).untrusted_input
         provenance: dict[str, Any] = {
@@ -342,6 +371,22 @@ class HeadAgent:
     # ------------------------------------------------------------------ #
     # Internal
     # ------------------------------------------------------------------ #
+
+    def _active_regulations_version(self) -> str:
+        """Resolve the active REGULATIONS version for DA-H2 plan provenance.
+
+        Returns the injected provider's value (the live ``OversightEngine``
+        version via ``state_.active_regulations_version``) or the safe ``"0.0.0"``
+        fallback when no provider is wired (dev/test). The provider used in
+        production is itself exception-safe (the ``active_regulations_version``
+        property swallows engine errors and falls back to ``"0.0.0"``), so this
+        never fabricates a version — and if a custom provider were to raise, the
+        exception propagates and the plan fails closed rather than shipping a Plan
+        with bogus provenance (§B-8 fail-fast).
+        """
+        if self._regulations_version_provider is None:
+            return "0.0.0"
+        return self._regulations_version_provider()
 
     def _messages_for(self, request: HeadPlanRequest, *, retry_hint: str | None) -> list[dict[str, str]]:
         body = {
@@ -408,6 +453,15 @@ class HeadAgent:
                 )
             except (KeyError, ValidationError) as exc:
                 raise ValueError(f"invalid step: {exc}") from exc
+            # G-C4 live producer: deterministically inject axis① provenance from
+            # action_type. http_get and connector_action steps automatically
+            # activate axis① via the Rule-of-Two reader. file_read activates axis①
+            # only when an explicit untrusted_file=true flag is present (flat or
+            # nested); the ingest-layer producer that sets this flag for untrusted
+            # file sources is a tracked follow-up (not yet shipped).
+            taint_src = taint_source_for_action(step.action_type, step.context)
+            if taint_src is not None:
+                step = HeadAgent.mark_untrusted_source(step, taint_src)
             if "id" in raw_step:
                 local_to_canonical[str(raw_step["id"])] = step.id
             steps.append(step)
@@ -432,6 +486,11 @@ class HeadAgent:
             steps=steps,
             risks=risks,
             assigned_subs=assigned,
+            # DA-H2: stamp immutable AI-generated provenance from the resolved
+            # planner model + active REGULATIONS version. Deterministic (no
+            # wall-clock); ``ai_generated`` defaults to the frozen ``True``.
+            model_id=self._model,
+            regulations_version=self._active_regulations_version(),
         )
         # back-reference each step to the plan id
         plan.steps = [s.model_copy(update={"plan_id": plan.id}) for s in plan.steps]

@@ -176,9 +176,6 @@ def _three_axis_kwargs() -> _ThreeAxisKwargs:
 
 
 def test_three_axis_step_invokes_hitl_gateway_and_autoreject_blocks() -> None:
-    # secugent.agents.sub_agent is an excluded enterprise tier; skip in a
-    # standalone public-core checkout where it is not shipped.
-    pytest.importorskip("secugent.agents.sub_agent")
     from secugent.agents.sub_agent import AutoRejectHitlGateway
 
     sink = _RecordingSink()
@@ -234,7 +231,6 @@ def test_three_axis_step_without_gateway_is_fail_closed() -> None:
 
 def test_three_axis_step_with_approving_gateway_passes() -> None:
     """A 3-axis step with an auto-approve gateway passes and emits an approve."""
-    pytest.importorskip("secugent.agents.sub_agent")
     from secugent.agents.sub_agent import AutoApproveHitlGateway
 
     sink = _RecordingSink()
@@ -269,9 +265,7 @@ def test_three_axis_step_with_approving_gateway_passes() -> None:
 
 def test_hitl_modify_decision_is_fail_closed() -> None:
     """A non-approve (modify) HITL outcome blocks (only approve passes)."""
-    pytest.importorskip("secugent.agents.sub_agent")
     from secugent.agents.sub_agent import HitlDecision
-
     from secugent.core.contracts import Approval
     from secugent.core.risk_analyzer import RiskAssessment
 
@@ -318,9 +312,7 @@ def test_decorator_with_no_positional_args_uses_none_target() -> None:
 
 
 def test_hitl_timeout_is_fail_closed() -> None:
-    pytest.importorskip("secugent.agents.sub_agent")
     from secugent.agents.sub_agent import HitlDecision, HitlTimeoutError
-
     from secugent.core.contracts import Approval
     from secugent.core.risk_analyzer import RiskAssessment
 

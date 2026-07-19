@@ -23,6 +23,7 @@ __all__ = [
     "VALID_SEVERITIES",
     "init_logging",
     "log",
+    "log_decision_gate",
 ]
 
 
@@ -115,6 +116,63 @@ def log(
     assert _LOGGER is not None
     # Always emit at info level — severity is a payload field, not a level.
     _LOGGER.info(payload["event_type"], **payload)
+
+
+_UNKNOWN: Final[str] = "unknown"
+
+
+def log_decision_gate(
+    *,
+    event_type: str,
+    run_id: str | None,
+    tenant_id: str | None,
+    severity: str,
+    correlation_id: str | None = None,
+    **extra: Any,
+) -> None:
+    """Emit a decision-gate record on the parallel structlog stream (D3-RR-01).
+
+    A thin, **fail-soft** producer for the §C-2 decision choke points (the SDK
+    gate and the SUB agent). It exists so the 6-field JSONL stream — empty until
+    now — is populated alongside (never replacing) the durable audit emit.
+
+    Two guarantees the bare :func:`log` does not give the call sites:
+
+    * **Always 6-field (INV-1).** ``run_id`` / ``tenant_id`` / ``correlation_id``
+      are defaulted to non-``None`` here (``"unknown"`` / falling back to
+      ``run_id``) so a system event with no run/tenant context can never trip the
+      DEV ``LoggingContractError``. ``severity`` is clamped into
+      :data:`VALID_SEVERITIES` (an unexpected value becomes ``"info"``) for the
+      same reason.
+    * **Never breaks the caller (INV-4).** A logging-layer failure (stream gone,
+      serialisation error) is swallowed: a decision/run must never fail because a
+      *parallel observability* emit raised. This is a deliberate, scoped
+      ``except`` (§B-8 fail-soft for a pure side-effect), not silent error
+      hiding — the durable §C-2 audit chain is the source of truth and is emitted
+      independently.
+
+    ``extra`` MUST carry only structural fields (``gate`` / ``decision`` / axis
+    labels) — never a policy body, token, command, or PII (INV-5). Callers are
+    responsible for not passing sensitive values; this helper does not inspect
+    ``extra`` beyond forwarding it.
+    """
+    resolved_run_id = run_id if run_id is not None else _UNKNOWN
+    resolved_tenant_id = tenant_id if tenant_id is not None else _UNKNOWN
+    resolved_correlation_id = correlation_id if correlation_id is not None else resolved_run_id
+    resolved_severity = severity if severity in VALID_SEVERITIES else "info"
+    try:
+        log(
+            event_type,
+            run_id=resolved_run_id,
+            tenant_id=resolved_tenant_id,
+            severity=resolved_severity,
+            correlation_id=resolved_correlation_id,
+            **extra,
+        )
+    except Exception:  # noqa: BLE001 - fail-soft: a parallel log must never break the run (INV-4)
+        # Best-effort: the durable §C-2 audit emit is independent and authoritative.
+        # We intentionally do not re-raise; observability is a side-effect here.
+        return
 
 
 def _emit_warning(missing: list[str]) -> None:

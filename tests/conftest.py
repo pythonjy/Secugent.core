@@ -17,6 +17,7 @@ are conditionally available (skipped if the dependency is not installed yet).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,6 +39,50 @@ from secugent.core.tenancy import TenantId
 #: New tests should pass an explicit tenant_id; this constant exists so
 #: factory fixtures here have one canonical value to inject.
 DEFAULT_TEST_TENANT = TenantId("legacy-default")
+
+
+# ---------------------------------------------------------------------------
+# Environment default (DA-C2 blast-radius mitigation)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _default_dev_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force ``SECUGENT_ENV=dev`` for the suite unless a test overrides it.
+
+    DA-C2 inverts the production default: an unset ``SECUGENT_ENV`` now means
+    *production* (fail-closed), so the permissive ``X-User-*`` dev header shim is
+    no longer reachable by default. The existing header-auth / RBAC test-suite was
+    written against the old ``unset ⇒ dev`` default, so without this fixture every
+    such test would flip to OIDC and 401.
+
+    The fixture only sets the var when it is currently unset, so a test that
+    explicitly wants production behaviour simply ``monkeypatch.setenv(...,
+    "production")`` (or ``delenv`` it in the test body — that runs *after* this
+    autouse fixture, since the body shares this function's ``monkeypatch``) and
+    wins over this default.
+    """
+    if os.environ.get("SECUGENT_ENV") is None:
+        monkeypatch.setenv("SECUGENT_ENV", "dev")
+
+
+# ---------------------------------------------------------------------------
+# Global singleton hygiene
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_egress_broker() -> Iterator[None]:
+    """Clear the process-wide egress broker after every test (FLAKE-2).
+
+    The broker is a module global installed via ``set_broker``; without a
+    teardown a broker installed by one test leaks into the next as a stale
+    singleton, making ``get_broker``-dependent tests order-sensitive.
+    """
+    yield
+    from secugent.io.broker import reset_broker
+
+    reset_broker()
 
 
 # ---------------------------------------------------------------------------

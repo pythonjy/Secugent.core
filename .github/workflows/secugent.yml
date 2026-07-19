@@ -14,34 +14,123 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
+      - name: Install runtime dependencies
+        # DA-H9 (2026-06-28): requirements.txt now contains ONLY runtime deps.
+        # Dev tools (pytest, ruff, mypy, hypothesis) are installed via the [dev]
+        # extra below so that requirements.txt stays a clean runtime manifest.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
+      - name: Format check
+        # DA-M14 (2026-06-28): added `ruff format --check .` — was missing from
+        # the main job while being enforced locally (§B-9 gate drift).
+        run: ruff format --check .
       - name: Type check
         run: mypy --strict secugent/
-      - name: Tests + coverage
+      - name: Unit + deterministic-module tests + coverage
         env:
           ANTHROPIC_API_KEY: ""
-        # Enterprise-tier (tests/enterprise) and integration (tests/integration)
-        # suites do NOT ship in the open-core public repo, so they are not
-        # collected. We run the whole existing public tree (pyproject testpaths is
-        # overridden when explicit paths are passed, so no explicit path arg is
-        # given here — collection falls back to testpaths=["tests"]). The 80%
-        # floor is the public tree's real, met coverage ceiling (the monorepo's
-        # 85% relied on the now-absent enterprise/integration suites).
+        # DA-M14 (2026-06-28): coverage scope and test paths updated.
+        #
+        # SCOPE: --cov=secugent.core --cov=secugent.audit --cov=secugent.regulations
+        # Why not --cov=secugent (full package)?  The full package includes steer/,
+        # tools/connectors/, api/ etc. — modules that are legitimately tested by the
+        # separate integration and api steps below, not by unit tests.  Measuring
+        # them here gives a misleadingly low total (42% full-package vs 90% core).
+        # The 90% gate applies to the core+audit+regulations surface, which IS the
+        # set that unit tests are designed to cover.
+        #
+        # TEST PATHS: tests/core, tests/audit, and tests/regulations are added
+        # alongside tests/unit and tests/enterprise to ensure the deterministic
+        # module tests contribute to coverage measurement.
+        #
+        # BDP_01 item 1: the tenant_admin authorization gate (deny-by-default,
+        # cross-tenant escalation) was MOVED out of tests/unit into tests/enterprise
+        # by the open-core boundary. testpaths in pyproject does NOT apply when CI
+        # passes explicit path args (they override it), so without naming
+        # tests/enterprise here the security-critical authorization suite would be
+        # untested in CI.
         run: >-
-          pytest
-          --cov=secugent --cov-fail-under=80
+          pytest tests/unit tests/enterprise tests/core tests/audit tests/regulations
+          --cov=secugent.core
+          --cov=secugent.audit
+          --cov=secugent.regulations
+          --cov-fail-under=90
+      - name: Deterministic-module coverage gate (§B-4a >=95%, ALL modules)
+        env:
+          ANTHROPIC_API_KEY: ""
+        # DA-M14 (2026-06-28): extended from tenant_admin-only to ALL §B-4a modules:
+        # - secugent.core.mechanical_oversight  (P0 block engine)
+        # - secugent.core.regulations           (P0 policy engine)
+        # - secugent.regulations                (converter + tenant_loader)
+        # - secugent.core.approval              (Plan Review / Rule of Two)
+        # - secugent.audit.hash_chain           (append-only audit chain)
+        # - secugent.audit.merkle               (Merkle tree root sealer)
+        # PREVIOUS gate covered only secugent.enterprise.tenant_admin (§B-4a gap).
+        # The tenant_admin gate is preserved in the enterprise identity-trust step.
+        run: >-
+          pytest tests/unit tests/enterprise tests/core tests/audit tests/regulations
+          --cov=secugent.core.mechanical_oversight
+          --cov=secugent.core.regulations
+          --cov=secugent.regulations
+          --cov=secugent.core.approval
+          --cov=secugent.audit.hash_chain
+          --cov=secugent.audit.merkle
+          --cov-fail-under=95
+      - name: Integration tests
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: pytest tests/integration
+      - name: Enterprise identity-trust auth suites (tests/api, [saml]+[ldap] extras)
+        env:
+          ANTHROPIC_API_KEY: ""
+        # DA-H5 (W5-d): the LDAP/SAML/authn-dispatch security suites live under
+        # tests/api, which NO other path-scoped pytest step names (explicit path
+        # args override pyproject `testpaths`) — so without this step the most
+        # security-critical W5 change set is DEAD in CI: a regression in SAML
+        # signature pinning / XSW / LDAP TLS fail-closed bind / the X-User-* shim
+        # being dead in saml/ldap mode would merge GREEN. The SAML/LDAP suites
+        # `pytest.importorskip(signxml/lxml/ldap3)`, which CI's requirements.txt does
+        # NOT pull — so a naive `pytest tests/api` would importorskip and report green
+        # having validated ZERO signature/bind logic. We therefore (a) install the
+        # [saml]+[ldap] extras and (b) HARD-FAIL if any is missing, turning a silent
+        # skip of an identity-trust suite into a CI failure (an auth suite must never
+        # pass having exercised nothing). After the import guard succeeds the
+        # importorskip can no longer trigger, so the validation actually runs.
+        run: |
+          pip install -e ".[dev,saml,ldap]"
+          python -c "import signxml, lxml.etree, ldap3"
+          pytest tests/api -rs
+      - name: RISKANALYZER Korean eval gate (G-H6, §B-4b)
+        env:
+          ANTHROPIC_API_KEY: ""
+        # tests/eval is collected by NO other path-scoped pytest step (explicit
+        # path args override pyproject testpaths) — without this it is dead in CI
+        # and the golden-set regression + F1 gate protect nothing. With the key
+        # forced empty the F1 threshold runs as xfail (mock) while the Korean
+        # golden-set invariants + A/B harness logic are hard-gated on every PR.
+        # The real-model F1>=0.75 gate is a release-time/manual check (a real
+        # model call is costly + non-deterministic for routine CI); run
+        # `pytest tests/eval` with ANTHROPIC_API_KEY set to exercise it, or use
+        # `python scripts/eval_ab.py` for model-swap A/B evidence.
+        run: pytest tests/eval -q
+      - name: Validate regulations examples
+        # scripts/validate_regulations.py + regulations_examples/ are private-tier
+        # (manifest-excluded). Guard so the extracted public repo — where both are
+        # absent — skips this step (green CI on first push) while the source repo,
+        # which ships them, still runs the validation.
+        if: ${{ hashFiles('scripts/validate_regulations.py') != '' }}
+        run: python scripts/validate_regulations.py regulations_examples/
 
-  # BDP_05 item 2/3/4: the public-release fail-closed gate
-  # (scripts/check_public_release.py — import-closure + secret + strategy-doc
-  # scan) is a standalone script, not a pytest target, so it needs its own job.
-  # tests/release + tests/ops (manifest closure/secret/100x-determinism +
-  # workflow structure) also run here as a focused, fast release-readiness check
-  # on every push/PR, independent of the broader `test` job. (§B-9 local gate.)
+  # BDP_05 item 2/3/4: the public-release fail-closed gate and its deterministic
+  # test suites (manifest closure/secret/100x-determinism + determinism.yml
+  # structure) are NOT collected by the `test` job's path-scoped pytest args, so
+  # without this dedicated job they would be dead in CI (the exact failure the
+  # boundary gate's placement comment warns about). This restores the §B-9 local
+  # release gate in CI on every push/PR.
   release-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -51,12 +140,63 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
+        # DA-H9 (2026-06-28): install runtime deps then dev extras so pytest,
+        # ruff, mypy are available in this job too.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e ".[dev]"
       - name: Public-release gate (import-closure + secret + strategy-doc scan)
         run: python scripts/check_public_release.py
       - name: Release + ops test suites (manifest determinism, workflow structure)
         env:
           ANTHROPIC_API_KEY: ""
         run: pytest tests/release tests/ops -q
+
+  # W8 A2/A3: live Helm render smoke test. The Python deploy tests
+  # (tests/deploy/test_helm_*) only MIRROR the Go template logic in Python; they
+  # cannot catch Go-parser bugs (e.g. the comment-chomp render breakage, A2) or the
+  # false-green where `helm lint` passes but `helm template` fails (A3). This job
+  # renders the chart with the documented minimal --set combinations so a render
+  # regression fails CI. Keep in lock-step with deploy/helm/README.md quick-start.
+  helm-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SS: --set secrets.SESSION_SECRET=ci-session-secret-0123456789abcdef
+      OIDC: --set oidc.issuer=https://idp.ci.internal --set oidc.clientId=ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: helm lint
+        run: helm lint deploy/helm
+      - name: helm template renders (stock single-node, dev/test egress off) + Recreate strategy
+        run: |
+          out=$(helm template test deploy/helm $SS $OIDC --set egressBroker.enabled=false)
+          # W8 review High: a single-node install mounts a ReadWriteOnce audit PVC, so it
+          # MUST use Recreate (no surge → no Multi-Attach / audit-chain double-writer).
+          echo "$out" | grep -q 'type: Recreate' || { echo 'FAIL: single-node strategy must be Recreate'; exit 1; }
+      - name: helm template renders (prod signed egress bundle)
+        run: |
+          printf '{"version":1,"roots":[],"sig":"ci"}' > /tmp/policy.bundle.json
+          helm template test deploy/helm $SS $OIDC \
+            --set-file policyBundle.signedBundleJson=/tmp/policy.bundle.json \
+            --set policyBundle.allowedKeyIds=ci-key > /dev/null
+      - name: helm template renders (ui + ingress enabled - A2 comment-chomp guard)
+        run: |
+          helm template test deploy/helm $SS $OIDC --set egressBroker.enabled=false \
+            --set ui.enabled=true \
+            --set ingress.enabled=true \
+            --set ingress.hosts[0].host=secugent.ci.internal \
+            --set ingress.hosts[0].paths[0].path=/ \
+            --set ingress.hosts[0].paths[0].pathType=Prefix > /dev/null
+      - name: helm template renders (HA opt-in - replicaCount>1 + shared PG) + RollingUpdate strategy
+        run: |
+          out=$(helm template test deploy/helm $SS $OIDC --set egressBroker.enabled=false \
+            --set replicaCount=2 --set postgresql.enabled=true \
+            --set persistence.data.enabled=false --set persistence.logs.enabled=false \
+            --set secrets.POSTGRES_PASSWORD=ci-pg-pw --set postgresql.host=pg.ci.internal)
+          # HA / PostgreSQL path mounts no ReadWriteOnce PVC → zero-downtime RollingUpdate is safe.
+          echo "$out" | grep -q 'type: RollingUpdate' || { echo 'FAIL: HA strategy must be RollingUpdate'; exit 1; }

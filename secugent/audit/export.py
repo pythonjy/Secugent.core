@@ -11,12 +11,17 @@ The export honours PHASE 0 redaction rules and adds an optional
 ``--redact pii`` pass that scrubs free-form PII patterns (email / KR RRN /
 phone) inside payload string values regardless of their key name.
 
+This module also provides :class:`SubjectAccessExporter` — PIPA §35 / GDPR
+Art.15 **subject-level Right-to-Access** export: a tenant-isolated, schema-
+validated, KST-stamped, deterministic dump of one data subject's processing
+records (read-only; never mutates the audit hash chain).
+
 .. note::
-   GDPR / PIPA Right-to-Erasure (an in-place ``--erase`` that rewrites a
-   subject's events and re-derives the hash chain) is **not implemented yet**.
-   It is a deliberate follow-up: erasure on an append-only, hash-chained log
-   requires a spec'd re-derivation + re-signing workflow (§B-1). Until then
-   this CLI only reads and exports.
+   PIPA §36 / GDPR Art.17 Right-to-**Erasure** is **design only** — see
+   ``docs/specs/2026-06-25-pipa-export-erasure.md`` Part C. Erasure on an
+   append-only, hash-chained log conflicts with audit integrity (re-deriving the
+   chain is rejected, §10.6); the spec evaluates tombstone / crypto-shredding and
+   defers implementation (§B-10 formal-methods area). It is NOT implemented here.
 """
 
 from __future__ import annotations
@@ -27,13 +32,26 @@ import json
 import re
 import sys
 from collections.abc import Callable, Iterable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
+from secugent.core.contracts import Event
 from secugent.core.event_store import EventStore
+from secugent.core.tenancy import TenantId
 
-__all__ = ["EDiscoveryExporter", "main", "scrub_pii_for_disclosure", "walk_strings"]
+__all__ = [
+    "EDiscoveryExporter",
+    "SubjectAccessExporter",
+    "SubjectAccessRecord",
+    "main",
+    "scrub_pii_for_disclosure",
+    "walk_strings",
+]
+
+#: KST (UTC+9) — 정보주체 열람권 산출물의 생성 시각 타임존(§C-3).
+_KST = timezone(timedelta(hours=9), name="KST")
 
 
 #: KR bank-account numbers: 3+ hyphen-separated digit groups, 10–14 total digits
@@ -312,6 +330,175 @@ class EDiscoveryExporter:
                         {**{k: row.get(k) for k in fieldnames if k != "payload"}, "payload": payload_str}
                     )
         return len(rows)
+
+
+# ---------------------------------------------------------------------------
+# PIPA §35 / GDPR Art.15 — subject-level Right-to-Access export (G-M5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SubjectAccessRecord:
+    """한 정보주체 열람권 추출 결과(불변, 스키마 검증된 직렬화 단위).
+
+    ``events`` 는 ``Event`` 모델을 통과한 형태(``model_dump(mode="json")``)만 담으며
+    ``(ts, id)`` 총 순서로 안정 정렬된다(spec INV-2/INV-4). ``to_json`` 은 ``sort_keys``
+    로 결정적이라 동일 입력은 바이트 동일 산출물을 만든다(INV-2).
+    """
+
+    subject_id: str
+    tenant_id: str
+    generated_at_kst: str
+    period: tuple[date, date] | None
+    event_count: int
+    events: tuple[dict[str, object], ...]
+    redaction_applied: bool
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "subject_id": self.subject_id,
+            "tenant_id": self.tenant_id,
+            "generated_at_kst": self.generated_at_kst,
+            "period": (
+                [self.period[0].isoformat(), self.period[1].isoformat()] if self.period is not None else None
+            ),
+            "event_count": self.event_count,
+            "redaction_applied": self.redaction_applied,
+            "events": list(self.events),
+        }
+
+    def to_json(self) -> str:
+        """결정적 JSON 직렬화(sort_keys, ensure_ascii=False) — 한국어 보존."""
+        return json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False)
+
+
+def _subject_matches(raw: dict[str, object], subject_id: str) -> bool:
+    """이벤트가 ``subject_id`` 에 '관한' 처리기록인지 결정적으로 판정(deny-by-default).
+
+    인정 조건(정확 문자열 일치만 — 부분일치/정규식 금지로 타 주체 누출 방지):
+      1. ``payload.subject_id == subject_id``
+      2. ``payload.data_subject_id == subject_id`` (별칭)
+      3. ``actor == subject_id`` (그 주체가 직접 행위자)
+    payload 가 dict 가 아니면 (1)(2) 불성립.
+    """
+    if raw.get("actor") == subject_id:
+        return True
+    payload = raw.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("subject_id") == subject_id or payload.get("data_subject_id") == subject_id
+
+
+def _within_kst_period(ts_value: object, period: tuple[date, date]) -> bool:
+    """이벤트 UTC 타임스탬프를 KST 날짜로 변환해 ``[start, end]`` 포함성을 본다."""
+    if not isinstance(ts_value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(ts_value)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    kst_date = parsed.astimezone(_KST).date()
+    start, end = period
+    return start <= kst_date <= end
+
+
+class SubjectAccessExporter:
+    """정보주체 단위 열람권(PIPA §35 / GDPR Art.15) 추출기.
+
+    기존 :class:`EDiscoveryExporter` 가 테넌트 전체 e-discovery 라면, 본 추출기는 **한
+    정보주체로 필터**한 처리기록을 빠짐없이·테넌트 격리하에·스키마 검증된 형태로 모은다.
+
+    **읽기 전용(INV-6)**: 감사 해시체인(``compute_chain_hash``/``canonical``/chain 테이블)
+    을 절대 호출·수정하지 않는다. 오직 race-free ``iter_all_events`` (keyset) 로 읽기만
+    하므로 det ``9b99792311ebcc94`` 는 불변이다.
+    """
+
+    def __init__(self, exporter: EDiscoveryExporter) -> None:
+        self._exporter = exporter
+
+    def collect(
+        self,
+        *,
+        tenant_id: str,
+        subject_id: str,
+        period: tuple[date, date] | None = None,
+        generated_at: datetime | None = None,
+        redact_pii: bool = True,
+        page_size: int = 10_000,
+    ) -> SubjectAccessRecord:
+        """``subject_id`` 에 관한 ``tenant_id`` 의 처리기록을 빠짐없이 모은다.
+
+        **인가 계약**: ``tenant_id`` 는 경계에서 :class:`TenantId` 정규식으로 검증된다 —
+        형식 위반은 즉시 :class:`ValueError`. 호출자(API 라우트)는 *이미 인증된 테넌트와
+        요청 테넌트가 일치함*을 추가로 보장해야 한다(cross-tenant 읽기 방지, fail-closed).
+
+        **fail-fast(§B-8)**: 빈 ``subject_id`` (전체 덤프 방지) · 뒤집힌 ``period`` ·
+        ``page_size < 1`` (자원고갈 차단) 은 즉시 :class:`ValueError`.
+
+        **완전성(INV-3)**: ``iter_all_events`` (keyset 커서) 로 소스를 소진할 때까지
+        페이징하므로 100k 캡으로 가장 오래된 이벤트가 잘리지 않는다.
+
+        **PII 보호(INV-5)**: ``redact_pii=True`` (기본) 시 대상 이벤트 안의 *타 정보주체*
+        PII(이메일/RRN/전화/카드/계좌)를 :func:`scrub_pii_for_disclosure` 로 마스킹한다.
+        대상 주체 식별자(``subject_id``) 자체는 매칭 키이므로 보존(매칭 후 적용).
+        """
+        if not subject_id:
+            raise ValueError("subject_id must be a non-empty string (refusing to dump whole tenant)")
+        if page_size < 1:
+            raise ValueError(f"page_size must be >= 1, got {page_size}")
+        if period is not None and period[0] > period[1]:
+            raise ValueError(
+                f"inverted period: start {period[0].isoformat()} must be <= end {period[1].isoformat()}"
+            )
+        # 경계 검증(finding-2 류): 잘못된 tenant_id 는 스토어 도달 전 ValueError.
+        tid = str(TenantId(tenant_id))
+
+        since = _period_start_utc(period[0]) if period is not None else None
+        matched: list[dict[str, object]] = []
+        for raw in self._exporter.iter_all_events(tenant_id=tid, since=since, page_size=page_size):
+            if period is not None and not _within_kst_period(raw.get("ts"), period):
+                continue
+            if not _subject_matches(raw, subject_id):
+                continue
+            # 스키마 검증(INV-4): 산출 전 Event 모델을 통과한 정규형만 담는다.
+            event = Event.model_validate(raw)
+            row = event.model_dump(mode="json")
+            if redact_pii:
+                row["payload"] = walk_strings(row.get("payload"), scrub_pii_for_disclosure)
+                row["actor"] = scrub_pii_for_disclosure(str(row["actor"]))
+            matched.append(row)
+
+        # (ts, id) 총 순서로 안정 정렬(체인 정렬 규칙과 동일 — INV-2).
+        matched.sort(key=lambda e: (str(e.get("ts")), str(e.get("id"))))
+        return SubjectAccessRecord(
+            subject_id=subject_id,
+            tenant_id=tid,
+            generated_at_kst=_format_kst(generated_at),
+            period=period,
+            event_count=len(matched),
+            events=tuple(matched),
+            redaction_applied=redact_pii,
+        )
+
+
+def _period_start_utc(start: date) -> datetime:
+    """기간 시작 KST 자정을 UTC 로 변환해 SQL ``since`` 푸시다운에 쓴다.
+
+    KST 날짜 ``start`` 의 00:00 KST 는 UTC 로 전날 15:00 이다. 이 시각 이후만 스토어에서
+    읽으면 범위 밖(이전) 이벤트를 미리 잘라낸다(상한은 ``_within_kst_period`` 가 처리).
+    """
+    kst_midnight = datetime(start.year, start.month, start.day, tzinfo=_KST)
+    return kst_midnight.astimezone(UTC)
+
+
+def _format_kst(generated_at: datetime | None) -> str:
+    """생성 시각을 KST ISO8601 문자열로(미지정 시 현재 KST)."""
+    moment = generated_at if generated_at is not None else datetime.now(tz=_KST)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(_KST).isoformat()
 
 
 # ---------------------------------------------------------------------------

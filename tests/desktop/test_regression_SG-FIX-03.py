@@ -48,9 +48,8 @@ class _FakeContainer:
 
 def _make_backend(container: _FakeContainer) -> Any:
     """Return a DockerBackend with its internals pre-wired to *container*."""
-    from secugent.desktop.docker_backend import DockerBackend
-
     from secugent.config import DockerBackendConfig
+    from secugent.desktop.docker_backend import DockerBackend
 
     cfg = DockerBackendConfig(image="secugent-test:latest")
 

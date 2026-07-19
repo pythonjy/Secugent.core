@@ -189,9 +189,16 @@ def http_get(
         raise BuiltinToolError(f"url normalisation failed: {exc}") from exc
 
     parsed = urlsplit(url if "://" in url else f"http://{url}")
-    if allowed_domains is not None and not _domain_in_list(
-        host, allowed_domains, allow_subdomains=allow_subdomains, allow_ip=False
-    ):
+    # B6 / §A-2.2 deny-by-default: an ABSENT allowlist must DENY, not fetch-any.
+    # The legacy code skipped the check when ``allowed_domains is None`` — a
+    # fail-OPEN path reachable only with the egress broker disabled
+    # (``SECUGENT_EGRESS_BROKER=0``), but still a hole. Refuse fail-closed.
+    if allowed_domains is None:
+        raise BuiltinToolError(
+            f"http_get refused: no allowed-domains allowlist configured (fail-closed); "
+            f"host {host} cannot be reached without an explicit allowlist"
+        )
+    if not _domain_in_list(host, allowed_domains, allow_subdomains=allow_subdomains, allow_ip=False):
         raise BuiltinToolError(f"host {host} not in allowed domains")
 
     if is_ip:

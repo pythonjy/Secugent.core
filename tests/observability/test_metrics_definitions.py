@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """PHASE 10 — Prometheus metric definition snapshot.
 
-The names/labels/HELP text of these 6 metrics are an external contract for
+The names/labels/HELP text of these 8 metrics are an external contract for
 Grafana dashboards and Prometheus alert rules; renaming them silently would
 break the dashboards. We pin the definitions with a snapshot test.
 """
@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from secugent.observability.metrics import (
     APPROVAL_WAIT,
+    COST_QUOTA_EXCEEDED,
+    COST_QUOTA_UTILIZATION,
     HITL_BACKLOG,
     LLM_TOKENS,
     POLICY_BLOCK,
@@ -47,9 +49,26 @@ def test_risk_branch_definition() -> None:
     assert tuple(RISK_BRANCH._labelnames) == ("tenant_id", "branch")
 
 
+def test_risk_branch_help_matches_emitted_labels() -> None:
+    """HELP must name the branches the code actually emits (silent/warn/hitl),
+    not the stale auto/hitl/block trio (D3-RR-03)."""
+    assert RISK_BRANCH._documentation == "RISKANALYZER decision branch (silent/warn/hitl)"
+
+
 def test_policy_block_definition() -> None:
     assert POLICY_BLOCK._name == "secugent_policy_block"
     assert tuple(POLICY_BLOCK._labelnames) == ("tenant_id", "category")
+
+
+def test_cost_quota_exceeded_definition() -> None:
+    # COST-02: Counter strips ``_total`` from ``_name`` (suffix only in exposition).
+    assert COST_QUOTA_EXCEEDED._name == "secugent_cost_quota_exceeded"
+    assert tuple(COST_QUOTA_EXCEEDED._labelnames) == ("tenant_id", "period")
+
+
+def test_cost_quota_utilization_definition() -> None:
+    assert COST_QUOTA_UTILIZATION._name == "secugent_cost_quota_utilization"
+    assert tuple(COST_QUOTA_UTILIZATION._labelnames) == ("tenant_id", "period")
 
 
 def test_snapshot_contains_all_metrics() -> None:
@@ -63,7 +82,14 @@ def test_snapshot_contains_all_metrics() -> None:
         "secugent_llm_tokens_total",
         "secugent_risk_branch_total",
         "secugent_policy_block_total",
+        "secugent_cost_quota_exceeded_total",
+        "secugent_cost_quota_utilization",
     }
+
+
+def test_snapshot_has_eight_metrics() -> None:
+    """COST-02 grew the registry from 6 to 8 metrics (two cost_* series)."""
+    assert len(metrics_snapshot()) == 8
 
 
 def test_init_metrics_returns_registry() -> None:

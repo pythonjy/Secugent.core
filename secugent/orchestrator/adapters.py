@@ -33,8 +33,12 @@ Fail-closed retry policy:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from tenacity import (
@@ -46,9 +50,11 @@ from tenacity import (
 )
 
 from secugent.agents.dispatcher import DispatcherResult
-from secugent.agents.head_agent import HeadPlanRequest
+from secugent.agents.head_agent import HeadPlanRequest, PartialApprovalResult
 from secugent.core.contracts import (
+    AI_GENERATED_MARKER,
     Approval,
+    Event,
     MissingRiskSectionError,
     Plan,
 )
@@ -59,6 +65,7 @@ from secugent.core.sec.envelope import AuthorizationEnvelope, EnvelopeUsage, bin
 from secugent.core.sec.envelope_builder import build_minimal_envelope
 from secugent.core.sec.envelope_diff import envelope_fingerprint
 from secugent.core.sec.labels import DataLabel
+from secugent.core.tenancy import TenantId
 from secugent.orchestrator.errors import (
     DispatcherResultMalformed,
     PlannerFailedError,
@@ -66,11 +73,15 @@ from secugent.orchestrator.errors import (
 )
 from secugent.orchestrator.runner import PlanLike
 from secugent.regulations.tenant_loader import RegulationsLoader, RegulationsSchemaError
+from secugent.steer.snapshots import RunCheckpoint, SQLiteCheckpointStore
 
 if TYPE_CHECKING:  # pragma: no cover
     from secugent.agents.head_agent import HeadAgent
     from secugent.agents.sub_agent import SubAgent
+    from secugent.audit.hash_chain import ChainedEventStore
     from secugent.core.approval import ApprovalService
+
+_logger = logging.getLogger(__name__)
 
 
 # BDP_02 item 4: ``HeadPlannerAdapter`` / ``DispatcherAdapter`` are re-exported as
@@ -192,6 +203,17 @@ class HeadPlannerAdapter:
             summary=plan.goal,
             steps=list(plan.steps),
             raw=plan,
+            # DA-H2: carry the native Plan's AI-generated provenance forward so the
+            # runner surfaces it on ``/runs/{id}`` for the Plan Review UI (W5-c).
+            ai_generated=plan.ai_generated,
+            model_id=plan.model_id,
+            regulations_version=plan.regulations_version,
+            # DA-H4 (W5-c a′): thread the HEAD-declared risks + step→sub mapping so
+            # the runner persists them for ``GET /api/plans/{id}`` (the Plan Review
+            # risk section + per-step assignment). Serialised to plain dicts here so
+            # the runner stays free of the concrete ``Risk`` type.
+            risks=[risk.model_dump(mode="json") for risk in plan.risks],
+            assigned_subs=dict(plan.assigned_subs),
         )
 
 
@@ -229,6 +251,9 @@ class DispatcherAdapter:
         fallback_engine: OversightEngine,
         regulations_loader: RegulationsLoader | None = None,
         run_engine_registry: RunEngineRegistry | None = None,
+        checkpoint_store: SQLiteCheckpointStore | None = None,
+        audit_chain: ChainedEventStore | None = None,
+        runner: Any = None,
     ) -> None:
         self._head = head
         self._dispatcher = dispatcher
@@ -243,8 +268,20 @@ class DispatcherAdapter:
         # Optional STEER registry hook (option A): publish the per-run engine so a
         # ``POST /steer`` for this run reaches THIS engine, not a stale shared one.
         self._run_engines = run_engine_registry
+        # SG-20260621-02: checkpoint store and audit chain for pause handling.
+        self._checkpoint_store = checkpoint_store
+        self._audit_chain = audit_chain
+        # SG-20260621-20: runner reference for notify_pause_completed callback.
+        # When set, _handle_pause_result drives the state machine after checkpoint write.
+        self._runner: Any = runner
 
-    async def dispatch(self, *, run_id: str, plan: PlanLike) -> dict[str, Any]:
+    async def dispatch(
+        self,
+        *,
+        run_id: str,
+        plan: PlanLike,
+        approved_step_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         plan_native = plan.raw
         if not isinstance(plan_native, Plan):
             raise DispatcherResultMalformed(
@@ -265,7 +302,9 @@ class DispatcherAdapter:
         # label (CONFIDENTIAL) so the broker EnvelopeGate (EM-08 go-live) admits
         # in-plan effects rather than suspending them on a label mismatch.
         envelope = build_minimal_envelope(plan_native, max_data_label=DataLabel.CONFIDENTIAL)
-        approval = self._issue_plan_approval(plan_native, envelope)
+        # DA-H4: a partial Plan Review approval narrows the minted scope to the
+        # selected step subset; ``None`` ⇒ full plan (legacy behaviour unchanged).
+        approval = self._issue_plan_approval(plan_native, envelope, approved_step_ids=approved_step_ids)
 
         # SG-20260603-01: compute the envelope fingerprint eagerly and thread it
         # as an explicit argument. This decouples envelope propagation from the
@@ -300,7 +339,122 @@ class DispatcherAdapter:
                 f"dispatcher returned {type(result).__name__}, expected DispatcherResult"
             )
 
+        # SG-20260621-02: if any sub-agent paused, write checkpoint + emit steer.paused.
+        # We inspect each SubAgentResult directly — DispatcherResult.sub_results is
+        # {actor: SubAgentResult}. A pause on any sub is propagated.
+        for _actor, sub_result in result.sub_results.items():
+            if getattr(sub_result, "paused_at_step_id", None) is not None:
+                await self._handle_pause_result(run_id, sub_result)
+                break  # one pause event per dispatch is sufficient
+
         return _result_to_dict(result)
+
+    # ------------------------------------------------------------------ #
+    # Pause handling (SG-20260621-02)
+    # ------------------------------------------------------------------ #
+
+    async def _handle_pause_result(self, run_id: str, sub_result: Any) -> None:
+        """Write RunCheckpoint + emit steer.paused when paused_at_step_id is set.
+
+        Durable-before-broadcast: checkpoint is written first, then steer.paused
+        is appended to the audit chain.  If checkpoint write fails, steer.failed
+        is emitted instead and the run remains RUNNING (fail-open on checkpoint
+        storage failure — the run is not aborted by a storage glitch).
+        """
+        if self._checkpoint_store is None:
+            _logger.warning(
+                "pause observed for run %s but no checkpoint_store wired; steer.paused not recorded",
+                run_id,
+            )
+            return
+
+        checkpoint = RunCheckpoint(
+            checkpoint_id=str(uuid.uuid4()),
+            run_id=run_id,
+            tenant_id=getattr(sub_result, "tenant_id", "legacy-default"),
+            step_index=getattr(sub_result, "step_index", 0),
+            pending_step_ids=list(getattr(sub_result, "pending_step_ids", [])),
+            completed_step_ids=list(getattr(sub_result, "completed_step_ids", [])),
+            session_patch_set=list(getattr(sub_result, "session_patch_set", [])),
+            patch_remaining_ttl=dict(getattr(sub_result, "patch_remaining_ttl", {})),
+            regulations_version=getattr(sub_result, "regulations_version", "0.0.0"),
+            envelope_hash=getattr(sub_result, "envelope_hash", ""),
+            rule_of_two_axes=list(getattr(sub_result, "rule_of_two_axes", [])),
+            approval_scope_ref=getattr(sub_result, "approval_scope_ref", ""),
+            staged_effect_disposition=list(getattr(sub_result, "staged_effect_disposition", [])),
+            file_before_images_ref=dict(getattr(sub_result, "file_before_images_ref", {})),
+            directive_log_ref=list(getattr(sub_result, "directive_log_ref", [])),
+            created_at=datetime.now(tz=UTC).isoformat(),
+            actor=getattr(sub_result, "actor", "system"),
+        )
+
+        try:
+            snap_ref = self._checkpoint_store.write(checkpoint)
+        except Exception:
+            _logger.exception("checkpoint write failed for run %s; emitting steer.failed", run_id)
+            # E4: write failure → emit steer.failed, keep run RUNNING (not aborted).
+            # SG-20260621-23b: §C-2 필수 필드 추가 (decision, input_hash,
+            # regulations_version, rule_of_two_axes, risk_score, actor dict).
+            if self._audit_chain is not None:
+                _error_key = "checkpoint_write_failed"
+                failed_ev = Event(
+                    tenant_id=TenantId(checkpoint.tenant_id),
+                    actor="system",
+                    type="steer.failed",
+                    severity="warn",
+                    run_id=run_id,
+                    payload={
+                        "error": _error_key,
+                        "gate": "steer",
+                        "decision": "reject",
+                        "input_hash": hashlib.sha256(_error_key.encode()).hexdigest(),
+                        "regulations_version": checkpoint.regulations_version,
+                        "rule_of_two_axes": checkpoint.rule_of_two_axes,
+                        "risk_score": None,
+                        "rationale": "체크포인트 기록 실패",
+                        "actor": {"type": "sec", "id": "system"},
+                    },
+                )
+                self._audit_chain.append_event(failed_ev)
+            return
+
+        # SG-20260621-20: Drive state machine INTERRUPT_REQUESTED→PAUSING→PAUSED_SNAPSHOTTED
+        # after durable checkpoint write succeeds (before steer.paused broadcast).
+        # Use getattr to remain compatible with __new__-created instances in tests
+        # that pre-date the runner parameter.
+        _runner = getattr(self, "_runner", None)
+        if _runner is not None:
+            _runner.notify_pause_completed(run_id)
+
+        # Durable-before-broadcast: checkpoint committed — now emit steer.paused.
+        # SG-20260621-23b NEW-2: actor도 §C-2 구조화 dict로 payload에 포함한다.
+        if self._audit_chain is not None:
+            paused_ev = Event(
+                tenant_id=TenantId(checkpoint.tenant_id),
+                actor="system",
+                type="steer.paused",
+                severity="info",
+                run_id=run_id,
+                payload={
+                    "paused_at_step_id": sub_result.paused_at_step_id,
+                    "context_snapshot_ref": snap_ref.uri,
+                    "gate": "steer",
+                    "decision": "approve",
+                    "input_hash": hashlib.sha256(snap_ref.uri.encode()).hexdigest(),
+                    "regulations_version": checkpoint.regulations_version,
+                    "rule_of_two_axes": checkpoint.rule_of_two_axes,
+                    "risk_score": None,
+                    "rationale": f"스텝 {sub_result.paused_at_step_id}에서 실행 일시정지",
+                    "actor": {"type": "sec", "id": "system"},
+                },
+            )
+            self._audit_chain.append_event(paused_ev)
+        else:
+            _logger.warning(
+                "checkpoint written for run %s (ref=%s) but no audit_chain wired; steer.paused not emitted",
+                run_id,
+                snap_ref.uri,
+            )
 
     # ------------------------------------------------------------------ #
     # Helpers
@@ -331,14 +485,36 @@ class DispatcherAdapter:
             ) from exc
         return OversightEngine(bundle.effective), bundle.effective.version
 
-    def _issue_plan_approval(self, plan: Plan, envelope: AuthorizationEnvelope) -> Approval:
+    def _issue_plan_approval(
+        self,
+        plan: Plan,
+        envelope: AuthorizationEnvelope,
+        *,
+        approved_step_ids: list[str] | None = None,
+    ) -> Approval:
         # In production HeadAgent.request_plan_approval mints a *pending*
         # approval bound to all plan step ids. The orchestrator's Plan Review
         # Gate already authorised the run by the time we reach here, so we
         # also grant the approval so Dispatcher.dispatch passes its sanity
         # check (status == 'approved'). The approval is bound to ``envelope``
         # (EM-08) so a substituted envelope at execution fails closed.
-        pending = self._head.request_plan_approval(plan, envelope_hash=envelope_fingerprint(envelope))
+        #
+        # DA-H4 (W5-c): when ``approved_step_ids`` is supplied (a partial Plan
+        # Review approval), build a ``PartialApprovalResult`` so HeadAgent mints a
+        # scope bound to EXACTLY those step ids (and the real Rule of Two axes of
+        # that subset). Unselected steps are absent from the scope, so the core
+        # ``_enforce_scope`` (UNCHANGED) rejects them at execution — fail-closed,
+        # deny-by-default (INV-W5C-1 / INV-W5C-5). ``None`` ⇒ full plan approval.
+        env_hash = envelope_fingerprint(envelope)
+        if approved_step_ids is None:
+            # Full plan approval — call signature unchanged (legacy/back-compat).
+            pending = self._head.request_plan_approval(plan, envelope_hash=env_hash)
+        else:
+            selected = sorted(set(approved_step_ids))
+            all_ids = [s.id for s in plan.steps]
+            deferred = sorted(set(all_ids) - set(selected))
+            partial = PartialApprovalResult(approved_step_ids=selected, deferred_step_ids=deferred)
+            pending = self._head.request_plan_approval(plan, partial=partial, envelope_hash=env_hash)
         return self._approvals.grant(pending.id, reason="orchestrator-approved")
 
 
@@ -381,6 +557,13 @@ def _result_to_dict(result: DispatcherResult) -> dict[str, Any]:
                         "actor": actor,
                         "step_id": o.step.id,
                         "payload": o.tool_result.payload,
+                        # DA-H2: every agent free-text output crossing this
+                        # orchestrator boundary toward an operator carries the
+                        # standardized Korean AI-identification marker. Attached
+                        # here (NOT in ``core.llm_client``) so BYO-Model neutrality
+                        # is preserved (INV-H2-3) — the marker is the caller's
+                        # responsibility, never the SDK wrapper's.
+                        "ai_identification": AI_GENERATED_MARKER,
                     }
                 )
 
@@ -395,4 +578,8 @@ def _result_to_dict(result: DispatcherResult) -> dict[str, Any]:
         "subs": subs,
         "partial_failure": partial,
         "failure_reason": failure_reason,
+        # DA-H2: aggregate AI-identification marker for the whole dispatch result
+        # so an operator surface that renders the result envelope (not just a
+        # single output) still shows the AI-generated notice.
+        "ai_identification": AI_GENERATED_MARKER,
     }

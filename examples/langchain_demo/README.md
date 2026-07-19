@@ -1,4 +1,4 @@
-# LangChain demo (embed SDK)
+# LangChain demo (BDP_02 item 4 — embed SDK)
 
 Wrap a **LangChain-style tool** in SecuGent oversight so a policy-violating tool
 call is deterministically **HARD BLOCKed** before it runs. This is the

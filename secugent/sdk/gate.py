@@ -47,6 +47,8 @@ from secugent.core.rule_of_two import (
     requires_hitl,
 )
 from secugent.core.tenancy import TenantId
+from secugent.observability.logging import log_decision_gate
+from secugent.observability.metrics import record_policy_block
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING so the gate's runtime import surface does not
@@ -334,6 +336,13 @@ class OversightGate:
                     axes=axis_values,
                     actor_type="sec",
                 )
+                # G-H8: emit POLICY_BLOCK at the embed-SDK hard-block boundary
+                # (best-effort, never raises — INV-3). A distinct entry point
+                # from the SUB path, so the same action is never double-counted.
+                record_policy_block(
+                    tenant_id=str(self.tenant_id),
+                    category=result.violation.category,
+                )
                 # raise_if_blocked() raises the canonical HardBlockException (I1: we
                 # reuse the core's own raise path rather than minting a new error).
                 result.raise_if_blocked()
@@ -563,6 +572,22 @@ class OversightGate:
         }
         self.audit.emit(event)
         self._prev_event_id = event_id
+        # D3-RR-01: emit a parallel structured decision-gate record onto the
+        # structlog stream (Loki/ELK), ALONGSIDE — never replacing — the durable
+        # §C-2 audit emit above. ``log_decision_gate`` is fail-soft (a logging
+        # failure never breaks ``enforce``) and always provides the full 6-field
+        # contract (INV-1/INV-4). Only structural labels are forwarded — no
+        # ``rationale`` / ``input_hash`` / ``target`` / policy body (INV-5).
+        log_decision_gate(
+            event_type=f"gate.{gate}.{decision}",
+            run_id=self.run_id,
+            tenant_id=str(self.tenant_id),
+            severity="warn" if decision in ("reject", "violation") else "info",
+            correlation_id=self.run_id,
+            gate=gate,
+            decision=decision,
+            actor_type=actor_type,
+        )
         return event
 
 

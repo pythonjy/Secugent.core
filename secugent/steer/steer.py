@@ -30,6 +30,7 @@ effect — only pre-commit recall (the honest scope).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -48,6 +49,7 @@ __all__ = [
     "SteerHandler",
     "SteerOutcome",
     "SteerClassification",
+    "SteerResumeEvent",
 ]
 
 
@@ -86,6 +88,21 @@ class SteerOutcome:
     classification: SteerClassification
     patch: SessionRegulationPatch | None = None
     events: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SteerResumeEvent:
+    """G-C3 D-D §8.3: Structured payload of the second steer.resumed producer.
+
+    Emitted when an actual PAUSED→RUNNING transition occurs (i.e. when
+    resume_from_checkpoint clears the engine pause). Distinguishable from the
+    cosmetic steer.resumed in apply() by the presence of ``from_checkpoint_id``.
+    """
+
+    event_id: str
+    run_id: str
+    from_checkpoint_id: str
+    actor: str
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +228,57 @@ class SteerHandler:
 
         emitted.append(self._emit(run_id, "steer.resumed", actor, {"action": classification.action}))
         return outcome
+
+    def emit_resume_from_checkpoint(
+        self,
+        *,
+        run_id: str,
+        from_checkpoint_id: str,
+        actor: str,
+        rule_of_two_axes: list[str] | None = None,
+    ) -> SteerResumeEvent:
+        """G-C3 D-D §8.3: Emit the SECOND steer.resumed producer.
+
+        This is a structurally distinct producer from the cosmetic steer.resumed
+        in :meth:`apply`. It fires when an actual PAUSED→RUNNING transition occurs
+        — i.e. when :meth:`~secugent.orchestrator.runner.RunOrchestrator.resume_from_checkpoint`
+        clears the engine pause. The payload includes ``from_checkpoint_id`` so
+        consumers can distinguish the two producers:
+
+        - Cosmetic (apply): payload contains ``action``, no ``from_checkpoint_id``.
+        - Structural (this method): payload contains ``from_checkpoint_id``.
+
+        Called by the runner's resume_from_checkpoint path or the API layer,
+        after engine.set_paused(paused=False) and before dispatch.
+        """
+        # SG-20260621-24: use real regulations version from oversight engine
+        _regs_version: str = "0.0.0"
+        try:
+            _regs_version = self._oversight.regulations.version
+        except Exception:  # noqa: BLE001, S110
+            pass
+        payload: dict[str, object] = {
+            "gate": "steer",
+            "decision": "approve",
+            "input_hash": hashlib.sha256(from_checkpoint_id.encode()).hexdigest(),
+            "regulations_version": _regs_version,
+            "rule_of_two_axes": rule_of_two_axes or [],
+            "risk_score": None,
+            "rationale": f"체크포인트 {from_checkpoint_id}에서 재개",
+            "from_checkpoint_id": from_checkpoint_id,
+        }
+        event_id = self._emit(
+            run_id,
+            "steer.resumed",
+            actor,
+            payload,
+        )
+        return SteerResumeEvent(
+            event_id=event_id,
+            run_id=run_id,
+            from_checkpoint_id=from_checkpoint_id,
+            actor=actor,
+        )
 
     # ------------------------------------------------------------------ #
     # Classifier

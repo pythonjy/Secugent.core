@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -19,19 +20,22 @@ from typing import Any, Protocol, TypeVar
 
 from secugent.core.contracts import Event, Step
 from secugent.core.sec.canonicalize import AmbiguousEffectError
-from secugent.core.sec.effects import EffectKind
+from secugent.core.sec.effects import Effect, EffectKind, SinkClass
 from secugent.core.sec.labels import DataLabel, may_egress
-from secugent.core.sec.policy import CompiledPolicy, Decision
+from secugent.core.sec.policy import Decision
 from secugent.core.sec.reversibility import ManifestRegistry, ReversibilityClass
-from secugent.core.tenancy import Principal
+from secugent.core.tenancy import Principal, TenantId
 from secugent.io.broker.effect_bridge import build_effect
+from secugent.io.broker.label_resolver import LabelResolver
 from secugent.io.broker.profiles import ExecutionProfile, profile_permits
 from secugent.io.broker.request import EgressRequest, EgressResult
 from secugent.io.broker.transport import Transport
+from secugent.orchestrator.envelope_gate import EnvelopeReviewGate
 from secugent.tools import builtin
 from secugent.tools.router import ToolDispatchError
 
 __all__ = [
+    "EGRESS_MAX_EXTERNAL_DEFAULT",
     "EgressBroker",
     "AuditStore",
     "EnvelopeGate",
@@ -41,11 +45,31 @@ __all__ = [
     "AuditAppendError",
     "StagingHeldError",
     "StagingStore",
+    "PolicyLike",
 ]
+
+
+class PolicyLike(Protocol):
+    """Structural interface for the broker's policy evaluator (EM-03).
+
+    Both :class:`~secugent.core.sec.policy.CompiledPolicy` (direct) and the
+    :class:`OversightEngineShim` (SG-20260623-02, routes through
+    ``OversightEngine.evaluate_effect``) satisfy this Protocol so the broker
+    never needs to import the concrete engine class (avoiding a core→io cycle).
+    """
+
+    def evaluate(self, effect: Effect, label: DataLabel) -> Decision: ...
+
 
 _T = TypeVar("_T")
 
 _log = logging.getLogger("secugent.io.broker")
+
+# Single source of truth for the EM-02 egress-label ceiling default. The
+# ``EgressBroker`` constructor default AND ``boot_wiring._MAX_EXTERNAL_DEFAULT``
+# both reference THIS constant (via ``is``), so raising/lowering the deny-by-default
+# ceiling is a one-line change with no comment-coupled restatement (INV-3).
+EGRESS_MAX_EXTERNAL_DEFAULT: DataLabel = DataLabel.INTERNAL_USE
 
 # Write-class effects carry a payload; dispatching one without content would
 # silently "write nothing" (fail-OPEN). These kinds require an explicit payload
@@ -139,11 +163,14 @@ class EgressBroker:
     def __init__(
         self,
         *,
-        policy: CompiledPolicy,
+        policy: PolicyLike,
         audit_store: AuditStore,
         transport: Transport,
-        max_external: DataLabel = DataLabel.INTERNAL_USE,
+        max_external: DataLabel = EGRESS_MAX_EXTERNAL_DEFAULT,
+        label_resolver: LabelResolver | None = None,
         envelope_gate: EnvelopeGate | None = None,
+        review_gate: EnvelopeReviewGate | None = None,
+        review_gate_factory: Callable[[], EnvelopeReviewGate] | None = None,
         connector_transport: ConnectorTransportLike | None = None,
         registry: ManifestRegistry | None = None,
         staging_store: StagingStore | None = None,
@@ -159,7 +186,29 @@ class EgressBroker:
         self._audit = audit_store
         self._transport = transport
         self._max_external = max_external
+        # EM-02 / SG-20260623-01: LabelResolver resolves the effective egress
+        # label per dispatch call (taint + LabelStore upper-bound). When None
+        # the broker falls back to ``_default_label`` (backward-compatible).
+        self._label_resolver = label_resolver
         self._envelope_gate = envelope_gate
+        # G-H15 (SG-20260624-01): EnvelopeReviewGate drives the SUSPEND → HITL →
+        # RESUME/ABORT state machine. An envelope "suspend" verdict calls
+        # on_suspend() instead of converting directly to a deny.
+        #
+        # The gate is per-(tenant, run): a single process-global gate would let a
+        # tenant-X decision resolve a tenant-Y suspend (cross-tenant HITL
+        # contamination) and would collide when two runs suspend concurrently.
+        # ``review_gate_factory`` (preferred for the multi-tenant live boot) mints
+        # a fresh gate the first time a given (tenant, run) suspends; the broker
+        # keys them in ``_review_gates``. ``review_gate`` (single instance) stays
+        # for single-run unit tests / explicit callers: it is reused for whatever
+        # (tenant, run) suspends first and registered under that key so the outbox
+        # endpoints resolve the same instance. Exactly one of the two is the
+        # source; the factory wins when both are supplied.
+        self._review_gate_factory = review_gate_factory
+        self._review_gate_seed = review_gate
+        self._review_gates: dict[tuple[str, str], EnvelopeReviewGate] = {}
+        self._review_gate_lock = threading.Lock()
         # EM-06: connector egress transport. None until go-live wiring lands; a
         # connector_action submitted with no transport configured fails closed.
         self._connector_transport = connector_transport
@@ -190,7 +239,7 @@ class EgressBroker:
     # ------------------------------------------------------------------ #
 
     def _run_gates(
-        self, req: EgressRequest
+        self, req: EgressRequest, *, skip_envelope: bool = False
     ) -> tuple[EgressResult, None] | tuple[None, tuple[Decision, Event]]:
         """Run the strongest-deny-first gate chain + audit-before-act (I-A).
 
@@ -200,6 +249,14 @@ class EgressBroker:
         already appended). The SAME chain backs both the sync router transport
         path (:meth:`_submit`) and the async connector path
         (:meth:`dispatch_connector`) so neither can skip a gate.
+
+        ``skip_envelope`` omits ONLY the EM-07 authorization-envelope gate, for the
+        pre-run read path (:meth:`dispatch_connector_read`): that gate presupposes a
+        bound run envelope, which does not exist before a run dispatches, so it would
+        deny-by-default. Every other control — profile, EM-03 signed policy,
+        §A-2.1 Rule-of-Two, EM-02 egress-label cap, EM-09 staging, audit-before-act —
+        still runs, so the relaxation is bounded (no run-scoped authorization), never
+        an ungated bypass.
         """
         # 1. Profile boundary.
         if not profile_permits(req.profile, req.effect):
@@ -230,7 +287,47 @@ class EgressBroker:
                 except Exception as exc:  # noqa: BLE001 - telemetry is non-fatal to the deny result
                     _log.warning("unscoped telemetry record failed (non-fatal): %s", exc)
             return self._deny(req, decision), None
+        # 2.5. Rule-of-Two 3-axis gate (SG-20260623-03, §A-2.1).
+        # When all three axes are simultaneously true the effect requires HITL;
+        # executing it without human approval violates the Rule of Two
+        # (SECURITY_CONTRACT §7). This gate runs AFTER policy allow so a
+        # permissive policy does NOT bypass the structural constraint — the two
+        # controls are independent layers. HITL wiring is a follow-on; today
+        # the deny is unconditional (no HITL bypass path exists yet) to match
+        # the spec's "HITL 없는 한 deny" semantics conservatively.
+        rot_axes = self._rule_of_two_axes(req.effect)
+        if all(rot_axes.values()):
+            return (
+                self._deny(
+                    req,
+                    Decision(
+                        outcome="deny",
+                        rule_id=None,
+                        rationale="rule_of_two_3axis_requires_hitl",
+                    ),
+                ),
+                None,
+            )
         # 3. Egress label (EM-02).
+        # F3 (INV-D): a fail-safe-derived label (LabelStore failure ⇒ the
+        # container's classification could not be authoritatively determined) must
+        # never leave through an EXTERNAL sink, regardless of the operator
+        # ``max_external`` ceiling — "cannot classify" is not "safe to send out".
+        # A general provenance rule, checked BEFORE the lattice comparison so even a
+        # ceiling raised to SECRET cannot re-open this path (which the ceiling alone
+        # would: fail-safe CONFIDENTIAL <= CONFIDENTIAL ceiling would otherwise pass).
+        if req.label_uncertain and req.effect.sink_class is SinkClass.EXTERNAL:
+            return (
+                self._deny(
+                    req,
+                    Decision(
+                        outcome="deny",
+                        rule_id=None,
+                        rationale="egress_label:label_provenance_uncertain",
+                    ),
+                ),
+                None,
+            )
         label_decision = may_egress(req.label, req.effect.sink_class, max_external=self._max_external)
         if not label_decision.allow:
             return (
@@ -240,10 +337,52 @@ class EgressBroker:
                 ),
                 None,
             )
-        # 4. Authorization envelope (EM-07, optional).
-        if self._envelope_gate is not None:
+        # 4. Authorization envelope (EM-07, optional). Skipped for the pre-run read
+        # path, where no run envelope is bound yet (it would deny-by-default); all
+        # other gates above/below still apply.
+        if not skip_envelope and self._envelope_gate is not None:
             verdict = self._envelope_gate.check(req)
             if verdict.outcome != "allow":
+                # G-H15: route through the per-(tenant, run) EnvelopeReviewGate
+                # when wired so the SUSPEND → HITL → RESUME/ABORT state machine is
+                # driven rather than a plain deny. Audit the HITL-pending event
+                # before returning (append-before-transport, I-A).
+                review_gate = self._review_gate_for(req.principal.tenant_id, req.run_id)
+                if review_gate is not None:
+                    try:
+                        review_gate.on_suspend(
+                            reason=verdict.reason,
+                            effect_fingerprint=req.effect.fingerprint(),
+                            action=req.effect.action or str(req.effect.kind),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - gate state error → fail-closed deny
+                        _log.warning("EnvelopeReviewGate.on_suspend failed: %s", exc)
+                    # Emit §C-2 HITL-pending audit event into the hash chain.
+                    hitl_event = Event(
+                        tenant_id=req.principal.tenant_id,
+                        actor=self._actor,
+                        type="hitl.pending",
+                        run_id=req.run_id,
+                        payload={
+                            "gate": "hitl",
+                            "decision": "pending",
+                            "rationale": f"envelope_suspend:{verdict.reason}",
+                            "effect_fingerprint": req.effect.fingerprint(),
+                            "kind": str(req.effect.kind),
+                            "sink": str(req.effect.sink_class),
+                            "target": req.effect.target,
+                            "label": int(req.label),
+                            "rule_of_two_axes": list(self._rule_of_two_axes(req.effect).keys()),
+                            "regulations_version": "0.0.0",
+                            "input_hash": req.effect.fingerprint(),
+                            "risk_score": 0,
+                        },
+                        severity="warn",
+                    )
+                    try:
+                        self._audit.append_event(hitl_event)
+                    except Exception as exc:  # noqa: BLE001 - audit write fail → deny (I-A)
+                        _log.error("envelope HITL pending audit append failed; refusing execution: %s", exc)
                 return (
                     self._deny(
                         req,
@@ -315,10 +454,80 @@ class EgressBroker:
             audit_event_id="",
         )
 
+    def _rule_of_two_axes(self, effect: Effect) -> dict[str, bool]:
+        """Classify the three Rule-of-Two axes for ``effect`` (§A-2.1).
+
+        Returns a mapping with three boolean entries:
+          - ``external_comm``: the effect targets an EXTERNAL sink.
+          - ``sensitive_access``: the effect kind touches files, network, or
+            connector actions (write-class kinds, §A-2.1).
+          - ``untrusted_input``: the effect's metadata carries the
+            ``untrusted_input="true"`` marker set by the head-agent / caller.
+
+        All three True simultaneously → Rule of Two violated → HITL required.
+        """
+        return {
+            "external_comm": effect.sink_class == SinkClass.EXTERNAL,
+            "sensitive_access": effect.kind
+            in (
+                EffectKind.FILE_WRITE,
+                EffectKind.NET_SEND,
+                EffectKind.CONNECTOR_ACTION,
+            ),
+            "untrusted_input": dict(effect.meta).get("untrusted_input") == "true",
+        }
+
     def _now(self) -> datetime:
         if self._now_provider is not None:
             return self._now_provider()
         return datetime.now(tz=UTC)
+
+    # ------------------------------------------------------------------ #
+    # Per-(tenant, run) EnvelopeReviewGate registry (SG-20260624-01)
+    # ------------------------------------------------------------------ #
+
+    def _review_gate_for(self, tenant_id: TenantId, run_id: str) -> EnvelopeReviewGate | None:
+        """Return (creating on first suspend) the gate for ``(tenant_id, run_id)``.
+
+        Isolation: each (tenant, run) gets its own gate so a decision for one can
+        never resolve another's pending HITL state (confused-deputy defense). When
+        a ``review_gate_factory`` is wired the gate is minted fresh per key; when
+        only a single seed ``review_gate`` was supplied (single-run unit tests),
+        the seed is registered under the first key that suspends and reused for it.
+        Returns None when neither a factory nor a seed was configured (back-compat).
+        """
+        factory = self._review_gate_factory
+        seed = self._review_gate_seed
+        if factory is None and seed is None:
+            return None
+        key = (str(tenant_id), run_id)
+        with self._review_gate_lock:
+            gate = self._review_gates.get(key)
+            if gate is not None:
+                return gate
+            if factory is not None:
+                gate = factory()
+            else:
+                # Reuse the single seed for whichever key suspends first; a second
+                # distinct key with a seed-only broker has no isolated gate
+                # (single-run contract — the live boot uses a factory). ``seed`` is
+                # non-None here (the early guard rules out both being None).
+                assert seed is not None
+                if seed in self._review_gates.values():
+                    return None
+                gate = seed
+            self._review_gates[key] = gate
+            return gate
+
+    def resolve_review_gate(self, tenant_id: TenantId, run_id: str) -> EnvelopeReviewGate | None:
+        """Public lookup: the registered gate for ``(tenant_id, run_id)`` or None.
+
+        Used by the outbox HITL endpoints so an operator decision resolves ONLY
+        the gate of the effect's own (tenant, run) — never a global singleton.
+        Does NOT create a gate (read-only; a missing key means nothing suspended).
+        """
+        with self._review_gate_lock:
+            return self._review_gates.get((str(tenant_id), run_id))
 
     # ------------------------------------------------------------------ #
     # Audit helpers
@@ -388,17 +597,34 @@ class EgressBroker:
         except AmbiguousEffectError as exc:
             raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
         principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
+        # EM-02 / SG-20260623-01: resolve effective label via LabelResolver when
+        # wired; fall back to _default_label (CONFIDENTIAL) for backward-compat.
+        container_id = step.id or step.run_id or ""
+        if self._label_resolver is not None:
+            resolved = self._run_coroutine(
+                self._label_resolver.resolve_with_provenance(
+                    tenant_id=step.tenant_id,
+                    container_id=container_id,
+                    taint_ctx=None,
+                )
+            )
+            resolved_label = resolved.label
+            label_uncertain = resolved.fail_safe  # F3: LabelStore-failure provenance
+        else:
+            resolved_label = self._default_label
+            label_uncertain = False
 
         # Connector egress (EM-06) bridges the sync drop-in to the async
         # ConnectorTransport, AFTER the same gate chain — never the router path.
         if effect.kind is EffectKind.CONNECTOR_ACTION:
             req = EgressRequest(
                 effect=effect,
-                label=self._default_label,
+                label=resolved_label,
                 principal=principal,
                 run_id=step.run_id,
                 profile=self._default_profile,
                 content=None,  # connector params travel in effect.meta, not content
+                label_uncertain=label_uncertain,
             )
             return self._run_coroutine(self._dispatch_connector_req(req, http_transport=http_transport))
 
@@ -419,16 +645,56 @@ class EgressBroker:
             )
         req = EgressRequest(
             effect=effect,
-            label=self._default_label,
+            label=resolved_label,
             principal=principal,
             run_id=step.run_id,
             profile=self._default_profile,
             content=content_bytes,
+            label_uncertain=label_uncertain,
         )
         result = self._submit(req)
         if not result.ok:
             raise _result_error(result)
         return builtin.ToolResult(ok=True, payload={"audit_event_id": result.audit_event_id})
+
+    async def _build_connector_req(self, step: Step) -> EgressRequest:
+        """Build the gated :class:`EgressRequest` for a connector_action ``step``.
+
+        Shared by :meth:`dispatch_connector` (run-execution) and
+        :meth:`dispatch_connector_read` (pre-run) so both mint the request — and
+        resolve the EM-02 label — identically; only the gate set they then run
+        differs (the read path skips the run-scoped envelope gate).
+        """
+        try:
+            effect = build_effect(step, sandbox_roots=self._sandbox_roots)
+        except AmbiguousEffectError as exc:
+            raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
+        if effect.kind is not EffectKind.CONNECTOR_ACTION:
+            raise EgressDeniedError(f"dispatch_connector requires a connector_action step, got {effect.kind}")
+        principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
+        # EM-02 / SG-20260623-01: resolve effective label via LabelResolver when
+        # wired; fall back to _default_label (CONFIDENTIAL) for backward-compat.
+        connector_container_id = step.id or step.run_id or ""
+        if self._label_resolver is not None:
+            connector_resolved = await self._label_resolver.resolve_with_provenance(
+                tenant_id=step.tenant_id,
+                container_id=connector_container_id,
+                taint_ctx=None,
+            )
+            connector_label = connector_resolved.label
+            connector_uncertain = connector_resolved.fail_safe  # F3 provenance
+        else:
+            connector_label = self._default_label
+            connector_uncertain = False
+        return EgressRequest(
+            effect=effect,
+            label=connector_label,
+            principal=principal,
+            run_id=step.run_id,
+            profile=self._default_profile,
+            content=None,
+            label_uncertain=connector_uncertain,
+        )
 
     async def dispatch_connector(
         self, step: Step, *, http_transport: Any | None = None
@@ -439,32 +705,40 @@ class EgressBroker:
         :meth:`dispatch` bridge). Raises a :class:`ToolDispatchError` subclass on
         any deny so the SubAgent's existing handler routes it to step.tool_failed.
         """
-        try:
-            effect = build_effect(step, sandbox_roots=self._sandbox_roots)
-        except AmbiguousEffectError as exc:
-            raise EgressDeniedError(f"ambiguous_effect:{exc}") from exc
-        if effect.kind is not EffectKind.CONNECTOR_ACTION:
-            raise EgressDeniedError(f"dispatch_connector requires a connector_action step, got {effect.kind}")
-        principal = Principal(user_id="broker", tenant_id=step.tenant_id, role="operator")
-        req = EgressRequest(
-            effect=effect,
-            label=self._default_label,
-            principal=principal,
-            run_id=step.run_id,
-            profile=self._default_profile,
-            content=None,
-        )
+        req = await self._build_connector_req(step)
         return await self._dispatch_connector_req(req, http_transport=http_transport)
 
+    async def dispatch_connector_read(
+        self, step: Step, *, http_transport: Any | None = None
+    ) -> builtin.ToolResult:
+        """Fully-gated connector egress for a PRE-RUN read (grounding retrieval).
+
+        Runs the SAME deny-by-default gates as :meth:`dispatch_connector` — profile
+        boundary, EM-03 signed policy, §A-2.1 Rule-of-Two 3-axis, EM-02 egress-label
+        cap, EM-09 irreversible-staging, and audit-before-act — but SKIPS the EM-07
+        authorization-envelope gate, which presupposes a bound run envelope. The
+        grounding producer runs this at submission time (``POST /api/command``),
+        BEFORE the run dispatches and binds its envelope, so the envelope gate would
+        otherwise deny-by-default. Every other external-effect control still applies
+        (EM-09 still diverts any irreversible action to staging), so a mutating action
+        can never use this path to skip 2-phase handling — it is a bounded relaxation
+        (no run-scoped authorization), not an ungated bypass. Raises a
+        :class:`ToolDispatchError` subclass on any deny.
+        """
+        req = await self._build_connector_req(step)
+        return await self._dispatch_connector_req(req, http_transport=http_transport, skip_envelope=True)
+
     async def _dispatch_connector_req(
-        self, req: EgressRequest, *, http_transport: Any | None
+        self, req: EgressRequest, *, http_transport: Any | None, skip_envelope: bool = False
     ) -> builtin.ToolResult:
         # Fail-closed: no connector transport wired ⇒ refuse before any gate work
         # (a connector_action that "passes" with no transport would fail OPEN).
         if self._connector_transport is None:
             raise EgressDeniedError("connector_transport_not_configured")
-        # IDENTICAL gate chain as the router path — connectors cannot skip a gate.
-        deny, allowed = self._run_gates(req)
+        # IDENTICAL gate chain as the router path — connectors cannot skip a gate
+        # (``skip_envelope`` omits ONLY the run-scoped EM-07 envelope gate; see
+        # :meth:`dispatch_connector_read`).
+        deny, allowed = self._run_gates(req, skip_envelope=skip_envelope)
         if deny is not None:
             raise _result_error(deny)
         assert allowed is not None

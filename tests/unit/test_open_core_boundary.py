@@ -417,6 +417,19 @@ def test_enterprise_extra_is_declared_in_pyproject() -> None:
     assert "enterprise" in extras, "the 'enterprise' optional-dependency extra is missing"
 
 
+def _pyproject_setuptools_find() -> dict[str, list[str]]:
+    """The ``[tool.setuptools.packages.find]`` include/exclude config from
+    pyproject — the single source of truth for what the wheel/sdist physically
+    ships. Read once here so the discovery replica and the exclude cross-check
+    (below) agree on exactly what setuptools will do."""
+    import tomllib
+
+    cfg = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    find = cfg["tool"]["setuptools"]["packages"]["find"]
+    assert isinstance(find, dict)
+    return find
+
+
 def _discovered_core_packages() -> set[str]:
     """Replicate setuptools ``[tool.setuptools.packages.find]`` discovery from
     pyproject (include/exclude fnmatch globs) without importing setuptools.
@@ -427,10 +440,8 @@ def _discovered_core_packages() -> set[str]:
     children). We mirror that exactly so the test asserts what actually ships.
     """
     import fnmatch
-    import tomllib
 
-    cfg = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    find = cfg["tool"]["setuptools"]["packages"]["find"]
+    find = _pyproject_setuptools_find()
     include: list[str] = find.get("include", ["*"])
     exclude: list[str] = find.get("exclude", [])
 
@@ -450,38 +461,93 @@ def _discovered_core_packages() -> set[str]:
 
 
 def test_core_wheel_excludes_enterprise_packages() -> None:
-    """Compliance (BDP_01 I2, license boundary): the BSL-1.1 Enterprise tier must
-    NOT be packaged into the Apache-2.0 Core distribution. ``pip install secugent``
-    must not deliver ``secugent.enterprise`` (kms.py, tenant_admin.py). The AST
-    gate only checks import direction; this checks *shipping* tiers separately —
-    the other half of I2 that was silently unenforced."""
+    """Compliance (BDP_01 I2, license boundary): NONE of the BSL-1.1/Enterprise
+    tiers may be packaged into the Apache-2.0 Core distribution — not just
+    ``secugent.enterprise`` but every tier ``docs/OPEN_CORE.md`` classifies as
+    ``LicenseRef-SecuGent-Enterprise`` (W8 A4: api/cost/compliance/evolution/
+    identity/integrations/desktop/playbooks all shipped into the Core wheel
+    before this gate — 55 Enterprise .py files — because the exclude list named
+    only ``secugent.enterprise*``). The AST gate only checks import *direction*;
+    this checks *shipping* tiers — the other half of I2.
+
+    Single source of truth: the expected Enterprise set is ``ENTERPRISE_PACKAGES``
+    (kept in lock-step with ``docs/OPEN_CORE.md`` by
+    ``test_tier_sets_match_open_core_doc``), and we also assert the pyproject
+    ``exclude`` list covers every one of those tiers. So adding a tier to
+    OPEN_CORE without excluding it in ``pyproject.toml`` fails here — no drift."""
+    import fnmatch
+
     discovered = _discovered_core_packages()
-    enterprise = sorted(p for p in discovered if _module_prefix_matches(p, "secugent.enterprise"))
-    assert not enterprise, (
-        "BSL-1.1 Enterprise packages must be excluded from the Apache-2.0 Core "
-        f"wheel via [tool.setuptools.packages.find] exclude, but were discovered: {enterprise}"
+
+    # (1) No discovered (i.e. shipped) Core package may BE, or live under, any
+    # Enterprise tier. This is what ``pip install secugent`` actually delivers.
+    leaked = sorted(
+        pkg for pkg in discovered if any(_module_prefix_matches(pkg, tier) for tier in ENTERPRISE_PACKAGES)
     )
-    # Sanity: discovery must still find the Core package (guards a broken matcher
-    # that vacuously passes by discovering nothing).
-    assert "secugent" in discovered, "package discovery found no Core packages — matcher is broken"
+    assert not leaked, (
+        "Enterprise-tier packages must be excluded from the Apache-2.0 Core wheel "
+        "via [tool.setuptools.packages.find] exclude (align it with the "
+        f"docs/OPEN_CORE.md Enterprise tier list), but were discovered: {leaked}"
+    )
+
+    # (2) Sanity — discovery must still find the Core package AND the mixed-tier
+    # Core packages (orchestrator/agents/models stay Core; their Enterprise-coupled
+    # modules rely on lazy import + the git manifest, NOT package-level exclusion).
+    # Guards both a broken matcher that vacuously passes by discovering nothing and
+    # an over-broad exclude glob that accidentally drops a Core package.
+    for core_pkg in (
+        "secugent",
+        "secugent.core",
+        "secugent.audit",
+        "secugent.cli",
+        "secugent.orchestrator",
+        "secugent.agents",
+        "secugent.models",
+    ):
+        assert core_pkg in discovered, (
+            f"Core package {core_pkg!r} is missing from wheel discovery — the "
+            "exclude glob is either broken (matches nothing) or over-broad "
+            "(dropped a Core/mixed tier that must ship)."
+        )
+
+    # (3) Cross-check (drift guard): every OPEN_CORE Enterprise tier must be
+    # covered by a pyproject exclude glob. Because ``_discovered_core_packages``
+    # only surfaces packages that exist on disk, a tier declared in OPEN_CORE but
+    # (re)moved could slip past (1); this makes the exclude list itself the
+    # asserted contract against ``ENTERPRISE_PACKAGES``.
+    exclude = _pyproject_setuptools_find().get("exclude", [])
+    uncovered = sorted(
+        tier for tier in ENTERPRISE_PACKAGES if not any(fnmatch.fnmatch(tier, pat) for pat in exclude)
+    )
+    assert not uncovered, (
+        "every Enterprise tier in docs/OPEN_CORE.md must have a matching "
+        "[tool.setuptools.packages.find] exclude glob (e.g. 'secugent.api*'), "
+        f"but these are not excluded and would ship in the Core wheel: {uncovered}"
+    )
 
 
 def test_committed_sources_manifest_omits_enterprise_modules() -> None:
-    """If a setuptools SOURCES.txt manifest is committed, it must not list any
-    ``secugent/enterprise/*.py`` source — that would mean the last build packaged
-    BSL-1.1 code into the Apache-2.0 Core distribution (the exact stale-manifest
-    evidence the review flagged). Skips cleanly when no manifest is committed."""
+    """If a setuptools SOURCES.txt manifest is committed, it must not list ANY
+    Enterprise-tier ``.py`` source — for every tier in ``docs/OPEN_CORE.md``, not
+    just ``secugent/enterprise/`` (W8 A4: the last build shipped api/cost/…/
+    playbooks sources into the Core sdist while this test only checked
+    ``enterprise/`` — a false-green). A listed Enterprise source means the last
+    build packaged commercial code into the Apache-2.0 Core distribution. Skips
+    cleanly when no manifest is committed."""
     manifest = REPO_ROOT / "secugent.egg-info" / "SOURCES.txt"
     if not manifest.is_file():
         pytest.skip("no committed SOURCES.txt build manifest")
+    # secugent.api -> "secugent/api/" ; single source of truth = ENTERPRISE_PACKAGES.
+    enterprise_prefixes = tuple(sorted(tier.replace(".", "/") + "/" for tier in ENTERPRISE_PACKAGES))
     listed = [
         line.strip()
         for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("secugent/enterprise/") and line.strip().endswith(".py")
+        if line.strip().endswith(".py") and line.strip().startswith(enterprise_prefixes)
     ]
     assert not listed, (
-        "SOURCES.txt lists Enterprise (BSL-1.1) modules as shipped in the Core "
-        f"distribution — rebuild after excluding secugent.enterprise*: {listed}"
+        "SOURCES.txt lists Enterprise-tier modules as shipped in the Apache-2.0 "
+        "Core distribution — rebuild after aligning [tool.setuptools.packages.find] "
+        f"exclude with docs/OPEN_CORE.md: {listed}"
     )
 
 
@@ -548,6 +614,7 @@ PUBLIC_CORE_PACKAGES: frozenset[str] = frozenset(
         "secugent.regulations",
         "secugent.tools",
         "secugent.io",
+        "secugent.db",
         "secugent.prompts",
         "secugent.deploy",
         # 혼합 패키지: 패키지 자체는 Core, 일부 파일은 manifest exclude
@@ -570,6 +637,10 @@ ENTERPRISE_PACKAGES: frozenset[str] = frozenset(
         "secugent.identity",  # D1: P2 옵셔널, registry.py가 secugent.api.rbac 설계 의존
         "secugent.integrations",  # D1: P2 옵셔널 외부 커넥터
         "secugent.desktop",  # D1: 데스크톱 자동화 최후수단, §A-1 Non-goal 준용
+        # playbooks(06-14 데스크톱 셸 기능)는 router.py가 secugent.api.security,
+        # wire.py가 secugent.api.main(AppState)을 import → Enterprise(api) 결합.
+        # Core는 Enterprise를 import할 수 없으므로(단방향 의존 I2) Enterprise 티어 확정.
+        "secugent.playbooks",
     }
 )
 
@@ -621,11 +692,8 @@ def test_every_top_level_package_has_a_tier() -> None:
         f"{sorted(unclassified)}"
     )
 
-    # 선언된 패키지가 디스크에 실제 존재하는지 검증 (환상 등재 = fail).
-    # 단, 공개 standalone 추출본에서는 Enterprise 티어 패키지가 manifest로 제외돼
-    # 디스크에 부재하는 것이 정상(올바른 분리)이므로 phantom 실패로 보지 않는다.
-    # Core 패키지가 부재하면 여전히 실패 — Core는 반드시 함께 배포돼야 한다.
-    phantom = (classified - actual) - ENTERPRISE_PACKAGES
+    # 선언된 패키지가 모두 디스크에 실제 존재하는지 검증 (환상 등재 = fail)
+    phantom = classified - actual
     assert not phantom, (
         f"티어 상수에 등재됐으나 디스크에 존재하지 않는 패키지(오타 또는 삭제 후 미정리): {sorted(phantom)}"
     )

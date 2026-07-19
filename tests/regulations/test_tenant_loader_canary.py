@@ -139,3 +139,45 @@ def test_non_canary_run_unchanged(tmp_path: Path) -> None:
     by_id = {p.rule_id: p for p in bundle.effective.banned_paths}
     assert by_id["r1"].severity == "critical"
     assert "r3" not in by_id
+
+
+def test_run_above_share_falls_back_to_tenant_bundle(tmp_path: Path) -> None:
+    """Branch 126->127: an *activated* canary (share > 0, payload present) whose
+    run_id hashes ABOVE the share ratio takes the deterministic NON-canary arm —
+    the plain tenant bundle (canary rule absent, tenant override present).
+
+    ratio = int(sha256('run-2')[:8]) / 2**64 == 0.7259 >= min(1.0, 0.5) → True
+    → return self.for_tenant(tenant_id). This is the hash-gated fallback at L126,
+    distinct from the earlier ``canary_share <= 0`` short-circuit at L120.
+    """
+    import hashlib
+
+    # Guard the precondition so a future hash change can't make this test vacuous.
+    ratio = int.from_bytes(hashlib.sha256(b"run-2").digest()[:8], "big") / 2**64
+    assert ratio >= 0.5, "fixture run_id must hash above the share for the fallback arm"
+
+    loader = _setup(tmp_path)
+    bundle = loader.for_run(
+        run_id="run-2",
+        tenant_id=TENANT,
+        canary_payload=_canary_payload_additive(),
+        canary_share=0.5,  # ACTIVATED canary, but run-2 hashes above 0.5 → fallback
+    )
+    by_id = {p.rule_id: p for p in bundle.effective.banned_paths}
+    # Plain tenant bundle: tenant override present …
+    assert by_id["r1"].severity == "critical"
+    assert "r2" in by_id
+    # … and the canary addition is NOT applied (we took the non-canary arm).
+    assert "r3" not in by_id
+    assert bundle.overrides is not None  # tenant overrides.json, not the canary
+
+    # Contrast (non-vacuous): a run_id that hashes BELOW 0.5 DOES apply the canary.
+    below = int.from_bytes(hashlib.sha256(b"run-1").digest()[:8], "big") / 2**64
+    assert below < 0.5
+    canary_bundle = loader.for_run(
+        run_id="run-1",
+        tenant_id=TENANT,
+        canary_payload=_canary_payload_additive(),
+        canary_share=0.5,
+    )
+    assert "r3" in {p.rule_id for p in canary_bundle.effective.banned_paths}
